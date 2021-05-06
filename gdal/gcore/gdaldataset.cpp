@@ -1044,9 +1044,8 @@ CPLErr GDALDataset::SetProjection( const char *pszProjection )
 
 CPLErr GDALDataset::SetSpatialRef( CPL_UNUSED const OGRSpatialReference* poSRS )
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError(CE_Failure, CPLE_NotSupported,
-                    "Dataset does not support the SetSpatialRef() method.");
+    ReportError(CE_Failure, CPLE_NotSupported,
+                "Dataset does not support the SetSpatialRef() method.");
     return CE_Failure;
 }
 
@@ -1079,9 +1078,8 @@ CPLErr GDALSetSpatialRef( GDALDatasetH hDS, OGRSpatialReferenceH hSRS )
 /** Pre GDAL-2.5 way */
 CPLErr GDALDataset::_SetProjection( const char * )
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError(CE_Failure, CPLE_NotSupported,
-                    "Dataset does not support the SetProjection() method.");
+    ReportError(CE_Failure, CPLE_NotSupported,
+        "Dataset does not support the SetProjection() method.");
     return CE_Failure;
 }
 //! @endcond
@@ -1218,9 +1216,8 @@ CPLErr CPL_STDCALL GDALGetGeoTransform( GDALDatasetH hDS,
 CPLErr GDALDataset::SetGeoTransform( CPL_UNUSED double *padfTransform )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError(CE_Failure, CPLE_NotSupported,
-                    "SetGeoTransform() not supported for this dataset.");
+    ReportError(CE_Failure, CPLE_NotSupported,
+        "SetGeoTransform() not supported for this dataset.");
 
     return CE_Failure;
 }
@@ -1792,9 +1789,8 @@ CPLErr GDALDataset::SetGCPs( CPL_UNUSED int nGCPCount,
                              CPL_UNUSED const OGRSpatialReference * poGCP_SRS )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError(CE_Failure, CPLE_NotSupported,
-                    "Dataset does not support the SetGCPs() method.");
+    ReportError(CE_Failure, CPLE_NotSupported,
+        "Dataset does not support the SetGCPs() method.");
 
     return CE_Failure;
 }
@@ -1810,9 +1806,8 @@ CPLErr GDALDataset::_SetGCPs( int,
                               const char * )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError(CE_Failure, CPLE_NotSupported,
-                    "Dataset does not support the SetGCPs() method.");
+    ReportError(CE_Failure, CPLE_NotSupported,
+        "Dataset does not support the SetGCPs() method.");
 
     return CE_Failure;
 }

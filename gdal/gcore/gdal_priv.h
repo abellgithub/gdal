@@ -79,15 +79,6 @@ class GDALAsyncReader;
 #include "ogr_core.h"
 #include "ogr_feature.h"
 
-//! @cond Doxygen_Suppress
-#define GMO_VALID                0x0001
-#define GMO_IGNORE_UNIMPLEMENTED 0x0002
-#define GMO_SUPPORT_MD           0x0004
-#define GMO_SUPPORT_MDMD         0x0008
-#define GMO_MD_DIRTY             0x0010
-#define GMO_PAM_CLASS            0x0020
-//! @endcond
-
 /************************************************************************/
 /*                       GDALMultiDomainMetadata                        */
 /************************************************************************/

@@ -141,9 +141,7 @@ CPL_CVSID("$Id$")
 class GDALPamDataset;
 
 GDALPamDataset::GDALPamDataset()
-{
-    SetMOFlags( GetMOFlags() | GMO_PAM_CLASS );
-}
+{}
 
 /************************************************************************/
 /*                          ~GDALPamDataset()                           */
@@ -159,6 +157,18 @@ GDALPamDataset::~GDALPamDataset()
     }
 
     PamClear();
+}
+
+/************************************************************************/
+/*                             IsPamObject()                            */
+/************************************************************************/
+
+/**
+  Determine if this is a PAM object.
+*/
+bool GDALPamDataset::IsPamObject() const
+{
+    return true;
 }
 
 /************************************************************************/
@@ -274,7 +284,7 @@ CPLXMLNode *GDALPamDataset::SerializeToXML( const char *pszUnused )
     {
         GDALRasterBand * const poBand = GetRasterBand(iBand+1);
 
-        if( poBand == nullptr || !(poBand->GetMOFlags() & GMO_PAM_CLASS) )
+        if( poBand == nullptr || !(poBand->IsPamObject()) )
             continue;
 
         CPLXMLNode * const psBandTree =
@@ -382,10 +392,8 @@ void GDALPamDataset::PamInitialize()
     {
         GDALRasterBand *poBand = GetRasterBand(iBand+1);
 
-        if( poBand == nullptr || !(poBand->GetMOFlags() & GMO_PAM_CLASS) )
-            continue;
-
-        cpl::down_cast<GDALPamRasterBand *>(poBand)->PamInitialize();
+        if( poBand && (poBand->IsPamObject() )
+            cpl::down_cast<GDALPamRasterBand *>(poBand)->PamInitialize();
     }
 }
 
@@ -624,7 +632,7 @@ CPLErr GDALPamDataset::XMLInit( CPLXMLNode *psTree, const char *pszUnused )
 
         GDALRasterBand *poBand = GetRasterBand(nBand);
 
-        if( poBand == nullptr || !(poBand->GetMOFlags() & GMO_PAM_CLASS) )
+        if( poBand == nullptr || !poBand->IsPamClass() )
             continue;
 
         GDALPamRasterBand *poPamBand = cpl::down_cast<GDALPamRasterBand *>(
@@ -1063,15 +1071,8 @@ CPLErr GDALPamDataset::CloneInfo( GDALDataset *poSrcDS, int nCloneFlags )
 
 {
     const int bOnlyIfMissing = nCloneFlags & GCIF_ONLY_IF_MISSING;
-    const int nSavedMOFlags = GetMOFlags();
 
     PamInitialize();
-
-/* -------------------------------------------------------------------- */
-/*      Suppress NotImplemented error messages - mainly needed if PAM   */
-/*      disabled.                                                       */
-/* -------------------------------------------------------------------- */
-    SetMOFlags( nSavedMOFlags | GMO_IGNORE_UNIMPLEMENTED );
 
 /* -------------------------------------------------------------------- */
 /*      GeoTransform                                                    */
@@ -1303,7 +1304,7 @@ CPLErr GDALPamDataset::SetSpatialRef( const OGRSpatialReference* poSRS )
     PamInitialize();
 
     if( psPam == nullptr )
-        return GDALDataset::SetSpatialRef( poSRS );
+        return CE_Failure;
 
     if( psPam->poSRS )
         psPam->poSRS->Release();
@@ -1345,8 +1346,6 @@ CPLErr GDALPamDataset::SetGeoTransform( double * padfTransform )
         memcpy( psPam->adfGeoTransform, padfTransform, sizeof(double) * 6 );
         return( CE_None );
     }
-
-    return GDALDataset::SetGeoTransform( padfTransform );
 }
 
 /************************************************************************/
@@ -1417,7 +1416,7 @@ CPLErr GDALPamDataset::SetGCPs( int nGCPCount, const GDAL_GCP *pasGCPList,
         return CE_None;
     }
 
-    return GDALDataset::SetGCPs( nGCPCount, pasGCPList, poGCP_SRS );
+    return CE_Failure;
 }
 
 /************************************************************************/
@@ -1587,12 +1586,6 @@ CPLErr GDALPamDataset::TryLoadAux(char **papszSiblingFiles)
         return CE_None;
 
     psPam->osAuxFilename = poAuxDS->GetDescription();
-
-/* -------------------------------------------------------------------- */
-/*      Do we have an SRS on the aux file?                              */
-/* -------------------------------------------------------------------- */
-    if( strlen(poAuxDS->GetProjectionRef()) > 0 )
-        GDALPamDataset::SetProjection( poAuxDS->GetProjectionRef() );
 
 /* -------------------------------------------------------------------- */
 /*      Geotransform.                                                   */

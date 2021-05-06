@@ -56,10 +56,7 @@ CPL_CVSID("$Id$")
 /************************************************************************/
 
 GDALPamRasterBand::GDALPamRasterBand()
-
-{
-    SetMOFlags( GetMOFlags() | GMO_PAM_CLASS );
-}
+{}
 
 /************************************************************************/
 /*                         GDALPamRasterBand()                          */
@@ -68,9 +65,7 @@ GDALPamRasterBand::GDALPamRasterBand()
 //! @cond Doxygen_Suppress
 GDALPamRasterBand::GDALPamRasterBand( int bForceCachedIOIn ) :
     GDALRasterBand(bForceCachedIOIn)
-{
-    SetMOFlags( GetMOFlags() | GMO_PAM_CLASS );
-}
+{}
 //! @endcond
 
 /************************************************************************/
@@ -81,6 +76,18 @@ GDALPamRasterBand::~GDALPamRasterBand()
 
 {
     PamClear();
+}
+
+/************************************************************************/
+/*                             IsPamObject()                            */
+/************************************************************************/
+
+/**
+  Determine if this is a PAM object.
+*/
+bool GDALPamRasterBand::IsPamObject() const
+{
+    return true;
 }
 
 /************************************************************************/
@@ -521,15 +528,8 @@ CPLErr GDALPamRasterBand::CloneInfo( GDALRasterBand *poSrcBand,
 
 {
     const bool bOnlyIfMissing = (nCloneFlags & GCIF_ONLY_IF_MISSING) != 0;
-    const int nSavedMOFlags = GetMOFlags();
 
     PamInitialize();
-
-/* -------------------------------------------------------------------- */
-/*      Suppress NotImplemented error messages - mainly needed if PAM   */
-/*      disabled.                                                       */
-/* -------------------------------------------------------------------- */
-    SetMOFlags( nSavedMOFlags | GMO_IGNORE_UNIMPLEMENTED );
 
 /* -------------------------------------------------------------------- */
 /*      Metadata                                                        */
@@ -651,8 +651,7 @@ CPLErr GDALPamRasterBand::CloneInfo( GDALRasterBand *poSrcBand,
         {
             if( !bOnlyIfMissing || GetColorTable() == nullptr )
             {
-                GDALPamRasterBand::SetColorTable(
-                    poSrcBand->GetColorTable() );
+                GDALPamRasterBand::SetColorTable( poSrcBand->GetColorTable() );
             }
         }
     }
@@ -673,11 +672,6 @@ CPLErr GDALPamRasterBand::CloneInfo( GDALRasterBand *poSrcBand,
             }
         }
     }
-
-/* -------------------------------------------------------------------- */
-/*      Restore MO flags.                                               */
-/* -------------------------------------------------------------------- */
-    SetMOFlags( nSavedMOFlags );
 
     return CE_None;
 }
@@ -726,7 +720,7 @@ CPLErr GDALPamRasterBand::SetNoDataValue( double dfNewValue )
     PamInitialize();
 
     if( !psPam )
-        return GDALRasterBand::SetNoDataValue( dfNewValue );
+        return CE_Failure;
 
     psPam->bNoDataValueSet = TRUE;
     psPam->dfNoDataValue = dfNewValue;
@@ -744,7 +738,7 @@ CPLErr GDALPamRasterBand::DeleteNoDataValue()
     PamInitialize();
 
     if( !psPam )
-        return GDALRasterBand::DeleteNoDataValue();
+        return CE_Failure;
 
     psPam->bNoDataValueSet = FALSE;
     psPam->dfNoDataValue = 0.0;
@@ -794,7 +788,7 @@ CPLErr GDALPamRasterBand::SetOffset( double dfNewOffset )
     PamInitialize();
 
     if( psPam == nullptr )
-        return GDALRasterBand::SetOffset( dfNewOffset );
+        return CE_Failure;
 
     if( psPam->dfOffset != dfNewOffset )
     {
@@ -832,7 +826,7 @@ CPLErr GDALPamRasterBand::SetScale( double dfNewScale )
     PamInitialize();
 
     if( psPam == nullptr )
-        return GDALRasterBand::SetScale( dfNewScale );
+        return CE_Failure;
 
     if( dfNewScale != psPam->dfScale )
     {
@@ -869,7 +863,7 @@ CPLErr GDALPamRasterBand::SetUnitType( const char *pszNewValue )
     PamInitialize();
 
     if( !psPam )
-        return GDALRasterBand::SetUnitType( pszNewValue );
+        return CE_Failure;
 
     if( pszNewValue == nullptr || pszNewValue[0] == '\0' )
     {
@@ -913,7 +907,7 @@ CPLErr GDALPamRasterBand::SetCategoryNames( char ** papszNewNames )
     PamInitialize();
 
     if( !psPam )
-        return GDALRasterBand::SetCategoryNames( papszNewNames );
+        return CE_Failure;
 
     CSLDestroy( psPam->papszCategoryNames );
     psPam->papszCategoryNames = CSLDuplicate( papszNewNames );
@@ -944,7 +938,7 @@ CPLErr GDALPamRasterBand::SetColorTable( GDALColorTable *poTableIn )
     PamInitialize();
 
     if( !psPam )
-        return GDALRasterBand::SetColorTable( poTableIn );
+        return CE_Failure;
 
     if( psPam->poColorTable != nullptr )
     {
@@ -981,7 +975,7 @@ CPLErr GDALPamRasterBand::SetColorInterpretation( GDALColorInterp eInterpIn )
         return CE_None;
     }
 
-    return GDALRasterBand::SetColorInterpretation( eInterpIn );
+    return CE_Failure;
 }
 
 /************************************************************************/
@@ -1257,8 +1251,7 @@ CPLErr GDALPamRasterBand::SetDefaultHistogram( double dfMin, double dfMax,
     PamInitialize();
 
     if( psPam == nullptr )
-        return GDALRasterBand::SetDefaultHistogram( dfMin, dfMax,
-                                                    nBuckets, panHistogram );
+        return CE_Failure;
 
 /* -------------------------------------------------------------------- */
 /*      Do we have a matching histogram we should replace?              */
@@ -1362,7 +1355,7 @@ CPLErr GDALPamRasterBand::SetDefaultRAT( const GDALRasterAttributeTable *poRAT )
     PamInitialize();
 
     if( psPam == nullptr )
-        return GDALRasterBand::SetDefaultRAT( poRAT );
+        return CE_Failure;
 
     psPam->poParentDS->MarkPamDirty();
 

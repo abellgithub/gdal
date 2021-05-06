@@ -43,8 +43,7 @@ CPL_CVSID("$Id$")
 /*                          GDALMajorObject()                           */
 /************************************************************************/
 
-GDALMajorObject::GDALMajorObject() :
-    nFlags(GMO_VALID)
+GDALMajorObject::GDALMajorObject() : nFlags(0)
 {}
 
 /************************************************************************/
@@ -53,12 +52,7 @@ GDALMajorObject::GDALMajorObject() :
 
 GDALMajorObject::~GDALMajorObject()
 
-{
-    if( (nFlags & GMO_VALID) == 0 )
-        CPLDebug( "GDAL", "In ~GDALMajorObject on invalid object" );
-
-    nFlags &= ~GMO_VALID;
-}
+{}
 
 /************************************************************************/
 /*                           GetDescription()                           */
@@ -293,7 +287,6 @@ CPLErr GDALMajorObject::SetMetadata( char ** papszMetadataIn,
                                      const char * pszDomain )
 
 {
-    nFlags |= GMO_MD_DIRTY;
     return oMDMD.SetMetadata( papszMetadataIn, pszDomain );
 }
 
@@ -390,7 +383,6 @@ CPLErr GDALMajorObject::SetMetadataItem( const char * pszName,
                                          const char * pszDomain )
 
 {
-    nFlags |= GMO_MD_DIRTY;
     return oMDMD.SetMetadataItem( pszName, pszValue,  pszDomain );
 }
 
@@ -421,6 +413,18 @@ GDALSetMetadataItem( GDALMajorObjectH hObject,
 
     return GDALMajorObject::FromHandle(hObject)->
         SetMetadataItem( pszName, pszValue, pszDomain );
+}
+
+/************************************************************************/
+/*                             IsPamObject()                            */
+/************************************************************************/
+
+/**
+  Determine if this is a PAM object.
+*/
+bool GDALMajorObject::IsPamObject() const
+{
+    return false;
 }
 
 /************************************************************************/

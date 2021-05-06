@@ -612,8 +612,7 @@ CPLErr GDALRasterBand::IWriteBlock( int /*nBlockXOff*/,
                                     void * /*pData*/ )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
+    ReportError( CE_Failure, CPLE_NotSupported,
                   "WriteBlock() not supported for this dataset." );
 
     return( CE_Failure );
@@ -1562,9 +1561,8 @@ char ** CPL_STDCALL GDALGetRasterCategoryNames( GDALRasterBandH hBand )
 
 CPLErr GDALRasterBand::SetCategoryNames( char ** /*papszNames*/ )
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetCategoryNames() not supported for this dataset." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetCategoryNames() not supported for this dataset." );
 
     return CE_Failure;
 }
@@ -1674,9 +1672,8 @@ GDALGetRasterNoDataValue( GDALRasterBandH hBand, int *pbSuccess )
 CPLErr GDALRasterBand::SetNoDataValue( double /*dfNoData*/ )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetNoDataValue() not supported for this dataset." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+         "SetNoDataValue() not supported for this dataset." );
 
     return CE_Failure;
 }
@@ -1728,9 +1725,8 @@ GDALSetRasterNoDataValue( GDALRasterBandH hBand, double dfValue )
 CPLErr GDALRasterBand::DeleteNoDataValue()
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "DeleteNoDataValue() not supported for this dataset." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "DeleteNoDataValue() not supported for this dataset." );
 
     return CE_Failure;
 }
@@ -2004,9 +2000,8 @@ CPLErr GDALRasterBand::SetColorInterpretation(
     GDALColorInterp /*eColorInterp*/ )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                  "SetColorInterpretation() not supported for this dataset." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetColorInterpretation() not supported for this dataset." );
     return CE_Failure;
 }
 
@@ -2099,9 +2094,8 @@ GDALColorTableH CPL_STDCALL GDALGetRasterColorTable( GDALRasterBandH hBand )
 CPLErr GDALRasterBand::SetColorTable( GDALColorTable * /*poCT*/ )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                  "SetColorTable() not supported for this dataset." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetColorTable() not supported for this dataset." );
     return CE_Failure;
 }
 
@@ -2473,9 +2467,8 @@ double CPL_STDCALL GDALGetRasterOffset( GDALRasterBandH hBand, int *pbSuccess )
 
 CPLErr GDALRasterBand::SetOffset( double /*dfNewOffset*/ )
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetOffset() not supported on this raster band." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetOffset() not supported on this raster band." );
 
     return CE_Failure;
 }
@@ -2574,15 +2567,11 @@ double CPL_STDCALL GDALGetRasterScale( GDALRasterBandH hBand, int *pbSuccess )
  * @return CE_None or success or CE_Failure on failure.
  */
 
-/**/
-/**/
-
 CPLErr GDALRasterBand::SetScale( double /*dfNewScale*/ )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetScale() not supported on this raster band." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetScale() not supported on this raster band." );
 
     return CE_Failure;
 }
@@ -2669,15 +2658,11 @@ const char * CPL_STDCALL GDALGetRasterUnitType( GDALRasterBandH hBand )
  * unsupported.
  */
 
-/**/
-/**/
-
 CPLErr GDALRasterBand::SetUnitType( const char * /*pszNewValue*/ )
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetUnitType() not supported on this raster band." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetUnitType() not supported on this raster band." );
     return CE_Failure;
 }
 
@@ -5725,9 +5710,8 @@ CPLErr GDALRasterBand::SetDefaultHistogram( double /* dfMin */,
                                             GUIntBig * /* panHistogram */)
 
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetDefaultHistogram() not implemented for this format." );
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetDefaultHistogram() not implemented for this format." );
 
     return CE_Failure;
 }
@@ -5869,13 +5853,11 @@ GDALRasterAttributeTableH CPL_STDCALL GDALGetDefaultRAT( GDALRasterBandH hBand)
 CPLErr GDALRasterBand::SetDefaultRAT(
     const GDALRasterAttributeTable * /* poRAT */ )
 {
-    if( !(GetMOFlags() & GMO_IGNORE_UNIMPLEMENTED) )
-    {
-        CPLPushErrorHandler(CPLQuietErrorHandler);
-        ReportError( CE_Failure, CPLE_NotSupported,
-                     "SetDefaultRAT() not implemented for this format." );
-        CPLPopErrorHandler();
-    }
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    ReportError( CE_Failure, CPLE_NotSupported,
+        "SetDefaultRAT() not implemented for this format." );
+    CPLPopErrorHandler();
+
     return CE_Failure;
 }
 
