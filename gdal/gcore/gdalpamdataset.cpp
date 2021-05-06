@@ -392,7 +392,7 @@ void GDALPamDataset::PamInitialize()
     {
         GDALRasterBand *poBand = GetRasterBand(iBand+1);
 
-        if( poBand && (poBand->IsPamObject() )
+        if( poBand && (poBand->IsPamObject()) )
             cpl::down_cast<GDALPamRasterBand *>(poBand)->PamInitialize();
     }
 }
@@ -632,7 +632,7 @@ CPLErr GDALPamDataset::XMLInit( CPLXMLNode *psTree, const char *pszUnused )
 
         GDALRasterBand *poBand = GetRasterBand(nBand);
 
-        if( poBand == nullptr || !poBand->IsPamClass() )
+        if( poBand == nullptr || !poBand->IsPamObject() )
             continue;
 
         GDALPamRasterBand *poPamBand = cpl::down_cast<GDALPamRasterBand *>(
@@ -1149,7 +1149,7 @@ CPLErr GDALPamDataset::CloneInfo( GDALDataset *poSrcDS, int nCloneFlags )
         {
             GDALRasterBand *poBand = GetRasterBand(iBand+1);
 
-            if( poBand == nullptr || !(poBand->GetMOFlags() & GMO_PAM_CLASS) )
+            if( poBand == nullptr || !(poBand->IsPamObject()) )
                 continue;
 
             if( poSrcDS->GetRasterCount() >= iBand+1 )
@@ -1175,11 +1175,6 @@ CPLErr GDALPamDataset::CloneInfo( GDALDataset *poSrcDS, int nCloneFlags )
     {
         GDALDriver::DefaultCopyMasks( poSrcDS, this, FALSE );
     }
-
-/* -------------------------------------------------------------------- */
-/*      Restore MO flags.                                               */
-/* -------------------------------------------------------------------- */
-    SetMOFlags( nSavedMOFlags );
 
     return CE_None;
 }
@@ -1346,6 +1341,7 @@ CPLErr GDALPamDataset::SetGeoTransform( double * padfTransform )
         memcpy( psPam->adfGeoTransform, padfTransform, sizeof(double) * 6 );
         return( CE_None );
     }
+    return CE_Failure;
 }
 
 /************************************************************************/

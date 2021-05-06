@@ -257,12 +257,12 @@ void NITFDataset::FlushCache()
     // If the JPEG/JP2K dataset has dirty pam info, then we should consider
     // ourselves to as well.
     if( poJPEGDataset != nullptr
-        && (poJPEGDataset->GetMOFlags() & GMO_PAM_CLASS)
+        && (poJPEGDataset->IsPamObject())
         && (reinterpret_cast<GDALPamDataset *>( poJPEGDataset )->GetPamFlags() & GPF_DIRTY) )
         MarkPamDirty();
 
     if( poJ2KDataset != nullptr
-        && (poJ2KDataset->GetMOFlags() & GMO_PAM_CLASS)
+        && (poJ2KDataset->IsPamObject())
         && (reinterpret_cast<GDALPamDataset *>( poJ2KDataset )->GetPamFlags() & GPF_DIRTY) )
         MarkPamDirty();
 
@@ -682,7 +682,7 @@ GDALDataset *NITFDataset::OpenInternal( GDALOpenInfo * poOpenInfo,
                 return nullptr;
             }
 
-            if (poDS->poJ2KDataset->GetMOFlags() & GMO_PAM_CLASS)
+            if (poDS->poJ2KDataset->IsPamObject())
             {
                 reinterpret_cast<GDALPamDataset *>(poDS->poJ2KDataset)->SetPamFlags(
                     reinterpret_cast<GDALPamDataset *>( poDS->poJ2KDataset)->GetPamFlags() | GPF_NOSAVE );
@@ -800,7 +800,7 @@ GDALDataset *NITFDataset::OpenInternal( GDALOpenInfo * poOpenInfo,
             return nullptr;
         }
 
-        if (poDS->poJPEGDataset->GetMOFlags() & GMO_PAM_CLASS)
+        if (poDS->poJPEGDataset->IsPamObject())
         {
             (reinterpret_cast<GDALPamDataset *>( poDS->poJPEGDataset ) )->SetPamFlags(
                 (reinterpret_cast<GDALPamDataset *>( poDS->poJPEGDataset ) )->GetPamFlags()
@@ -1698,10 +1698,10 @@ GDALDataset *NITFDataset::OpenInternal( GDALOpenInfo * poOpenInfo,
 /*      If we have jpeg, or jpeg2000 bands we may need to clear         */
 /*      their PAM dirty flag too.                                       */
 /* -------------------------------------------------------------------- */
-    if( poDS->poJ2KDataset != nullptr && (poDS->poJ2KDataset->GetMOFlags() & GMO_PAM_CLASS) )
+    if( poDS->poJ2KDataset != nullptr && (poDS->poJ2KDataset->IsPamObject()) )
         ( reinterpret_cast<GDALPamDataset *>( poDS->poJ2KDataset ) )->SetPamFlags(
             ( reinterpret_cast<GDALPamDataset *>( poDS->poJ2KDataset ) )->GetPamFlags() & ~GPF_DIRTY );
-    if( poDS->poJPEGDataset != nullptr && (poDS->poJPEGDataset->GetMOFlags() & GMO_PAM_CLASS) )
+    if( poDS->poJPEGDataset != nullptr && (poDS->poJPEGDataset->IsPamObject()) )
       ( reinterpret_cast<GDALPamDataset*>( poDS->poJPEGDataset ) )->SetPamFlags(
             ( reinterpret_cast<GDALPamDataset *> (poDS->poJPEGDataset ) )->GetPamFlags() & ~GPF_DIRTY );
 
@@ -4960,7 +4960,6 @@ NITFDataset::NITFCreateCopy(
 
     if( (nGCIFFlags & GCIF_METADATA) == 0 )
     {
-        const int nSavedMOFlags = poDstDS->GetMOFlags();
         papszSrcMD = poSrcDS->GetMetadata();
         if( papszSrcMD != nullptr )
         {
@@ -4987,7 +4986,6 @@ NITFDataset::NITFCreateCopy(
                 poDstDS->SetMetadata( papszSrcMD );
             }
         }
-        poDstDS->SetMOFlags(nSavedMOFlags);
     }
 
     CSLDestroy(papszCgmMD);

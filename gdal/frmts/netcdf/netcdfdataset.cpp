@@ -2405,7 +2405,7 @@ CPLXMLNode *netCDFDataset::SerializeToXML( const char *pszUnused )
         netCDFRasterBand *poBand =
             static_cast<netCDFRasterBand *>(GetRasterBand(iBand + 1));
 
-        if( poBand == nullptr || !(poBand->GetMOFlags() & GMO_PAM_CLASS) )
+        if( poBand == nullptr || !(poBand->IsPamObject()) )
             continue;
 
         CPLXMLNode *psBandTree = poBand->SerializeToXML(pszUnused);

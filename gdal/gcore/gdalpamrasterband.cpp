@@ -277,8 +277,7 @@ void GDALPamRasterBand::PamInitialize()
         return;
 
     GDALDataset* poNonPamParentDS = GetDataset();
-    if( poNonPamParentDS == nullptr ||
-        !(poNonPamParentDS->GetMOFlags() & GMO_PAM_CLASS) )
+    if( poNonPamParentDS == nullptr || !poNonPamParentDS->IsPamObject() )
         return;
 
     GDALPamDataset *poParentDS =

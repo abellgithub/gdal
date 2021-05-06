@@ -43,7 +43,7 @@ CPL_CVSID("$Id$")
 /*                          GDALMajorObject()                           */
 /************************************************************************/
 
-GDALMajorObject::GDALMajorObject() : nFlags(0)
+GDALMajorObject::GDALMajorObject()
 {}
 
 /************************************************************************/
@@ -427,28 +427,3 @@ bool GDALMajorObject::IsPamObject() const
     return false;
 }
 
-/************************************************************************/
-/*                             GetMOFlags()                             */
-/************************************************************************/
-
-/** Returns the GMO_ flags.
- * @return flags
- */
-int GDALMajorObject::GetMOFlags() const
-
-{
-    return nFlags;
-}
-
-/************************************************************************/
-/*                             SetMOFlags()                             */
-/************************************************************************/
-
-/** Assign GMO_flags.
- * @param nNewFlags new flags.
- */
-void GDALMajorObject::SetMOFlags( int nNewFlags )
-
-{
-    nFlags = nNewFlags;
-}

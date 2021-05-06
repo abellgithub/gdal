@@ -580,7 +580,7 @@ GDALDefaultOverviews::BuildOverviewsSubDataset(
             {
                 CPLString osAdjustedOvrFilename;
 
-                if( poDS->GetMOFlags() & GMO_PAM_CLASS )
+                if( poDS->IsPamObject() )
                 {
                     osAdjustedOvrFilename.Printf(
                         ":::BASE:::%s_%d.ovr",

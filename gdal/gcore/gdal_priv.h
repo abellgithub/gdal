@@ -127,7 +127,6 @@ class CPL_DLL GDALMajorObject
 {
   protected:
 //! @cond Doxygen_Suppress
-    int                 nFlags; // GMO_* flags.
     CPLString           sDescription{};
     GDALMultiDomainMetadata oMDMD{};
 
@@ -138,9 +137,6 @@ class CPL_DLL GDALMajorObject
   public:
                         GDALMajorObject();
     virtual            ~GDALMajorObject();
-
-    int                 GetMOFlags() const;
-    void                SetMOFlags( int nFlagsIn );
 
     virtual const char *GetDescription() const;
     virtual void        SetDescription( const char * );
@@ -155,6 +151,9 @@ class CPL_DLL GDALMajorObject
     virtual CPLErr      SetMetadataItem( const char * pszName,
                                          const char * pszValue,
                                          const char * pszDomain = "" );
+//! @cond Doxygen_Suppress
+    virtual bool IsPamObject() const;
+//! @endcond
 
     /** Convert a GDALMajorObject* to a GDALMajorObjectH.
      * @since GDAL 2.3

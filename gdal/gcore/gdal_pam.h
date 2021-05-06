@@ -137,7 +137,6 @@ class CPL_DLL GDALPamDataset : public GDALDataset
     int         nPamFlags = 0;
     GDALDatasetPamInfo *psPam = nullptr;
 
-    virtual bool IsPamObject() const override;
     virtual const char *_GetProjectionRef() override;
     virtual const char *_GetGCPProjection() override;
     virtual CPLErr _SetProjection( const char * pszProjection ) override;
@@ -198,6 +197,7 @@ class CPL_DLL GDALPamDataset : public GDALDataset
     void ClearStatistics() override;
 
 //! @cond Doxygen_Suppress
+    virtual bool IsPamObject() const override;
     virtual CPLErr CloneInfo( GDALDataset *poSrcDS, int nCloneInfoFlags );
 
     CPLErr IBuildOverviews( const char *pszResampling,
@@ -284,7 +284,6 @@ class CPL_DLL GDALPamRasterBand : public GDALRasterBand
     virtual CPLXMLNode *SerializeToXML( const char *pszVRTPath );
     virtual CPLErr      XMLInit( CPLXMLNode *, const char * );
 
-    virtual bool IsPamObject() const override;
     void   PamInitialize();
     void   PamClear();
 
@@ -294,6 +293,7 @@ class CPL_DLL GDALPamRasterBand : public GDALRasterBand
   public:
                 GDALPamRasterBand();
 //! @cond Doxygen_Suppress
+    virtual bool IsPamObject() const override;
     explicit    GDALPamRasterBand(int bForceCachedIO);
 //! @endcond
     ~GDALPamRasterBand() override;
