@@ -163,7 +163,7 @@ GDALPamDataset::~GDALPamDataset()
 /*                             IsPamObject()                            */
 /************************************************************************/
 
-/! @cond Doxygen_Suppress
+//! @cond Doxygen_Suppress
 bool GDALPamDataset::IsPamObject() const
 {
     return true;

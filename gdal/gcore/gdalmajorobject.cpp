@@ -419,7 +419,7 @@ GDALSetMetadataItem( GDALMajorObjectH hObject,
 /*                             IsPamObject()                            */
 /************************************************************************/
 
-/! @cond Doxygen_Suppress
+//! @cond Doxygen_Suppress
 bool GDALMajorObject::IsPamObject() const
 {
     return false;
