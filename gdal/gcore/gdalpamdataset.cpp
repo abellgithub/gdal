@@ -163,9 +163,7 @@ GDALPamDataset::~GDALPamDataset()
 /*                             IsPamObject()                            */
 /************************************************************************/
 
-/**
-  Determine if this is a PAM object.
-*/
+/! @cond Doxygen_Suppress
 bool GDALPamDataset::IsPamObject() const
 {
     return true;

@@ -419,9 +419,7 @@ GDALSetMetadataItem( GDALMajorObjectH hObject,
 /*                             IsPamObject()                            */
 /************************************************************************/
 
-/**
-  Determine if this is a PAM object.
-*/
+/! @cond Doxygen_Suppress
 bool GDALMajorObject::IsPamObject() const
 {
     return false;

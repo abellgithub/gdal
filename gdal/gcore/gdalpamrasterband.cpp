@@ -82,6 +82,7 @@ GDALPamRasterBand::~GDALPamRasterBand()
 /*                             IsPamObject()                            */
 /************************************************************************/
 
+/! @cond Doxygen_Suppress
 bool GDALPamRasterBand::IsPamObject() const
 {
     return true;
