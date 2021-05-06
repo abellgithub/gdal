@@ -1582,6 +1582,11 @@ CPLErr GDALPamDataset::TryLoadAux(char **papszSiblingFiles)
         return CE_None;
 
     psPam->osAuxFilename = poAuxDS->GetDescription();
+/* -------------------------------------------------------------------- */
+/*      Do we have an SRS on the aux file?                              */
+/* -------------------------------------------------------------------- */
+    if( strlen(poAuxDS->GetProjectionRef()) > 0 )
+        GDALDataset::SetProjection( poAuxDS->GetProjectionRef() );
 
 /* -------------------------------------------------------------------- */
 /*      Geotransform.                                                   */

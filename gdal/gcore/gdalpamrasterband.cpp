@@ -82,9 +82,6 @@ GDALPamRasterBand::~GDALPamRasterBand()
 /*                             IsPamObject()                            */
 /************************************************************************/
 
-/**
-  Determine if this is a PAM object.
-*/
 bool GDALPamRasterBand::IsPamObject() const
 {
     return true;
