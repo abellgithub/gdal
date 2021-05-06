@@ -2567,6 +2567,9 @@ double CPL_STDCALL GDALGetRasterScale( GDALRasterBandH hBand, int *pbSuccess )
  * @return CE_None or success or CE_Failure on failure.
  */
 
+/**/
+/**/
+
 CPLErr GDALRasterBand::SetScale( double /*dfNewScale*/ )
 
 {
@@ -2657,6 +2660,9 @@ const char * CPL_STDCALL GDALGetRasterUnitType( GDALRasterBandH hBand )
  * @return CE_None on success or CE_Failure if not successful, or
  * unsupported.
  */
+
+/**/
+/**/
 
 CPLErr GDALRasterBand::SetUnitType( const char * /*pszNewValue*/ )
 
