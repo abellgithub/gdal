@@ -31,7 +31,6 @@
 #define CPL_WORKER_THREAD_POOL_H_INCLUDED_
 
 #include "cpl_multiproc.h"
-#include "cpl_list.h"
 
 #include <condition_variable>
 #include <functional>
@@ -59,17 +58,12 @@ struct CPLWorkerThread
     void *pInitData = nullptr;
     CPLWorkerThreadPool *poTP = nullptr;
     CPLJoinableThread *hThread = nullptr;
-    bool bMarkedAsWaiting = false;
-
-    std::mutex m_mutex{};
-    std::condition_variable m_cv{};
 };
 
 typedef enum
 {
     CPLWTS_OK,
-    CPLWTS_STOP,
-    CPLWTS_ERROR
+    CPLWTS_STOP
 } CPLWorkerThreadState;
 #endif  // ndef DOXYGEN_SKIP
 
@@ -80,28 +74,26 @@ class CPL_DLL CPLWorkerThreadPool
 {
     CPL_DISALLOW_COPY_ASSIGN(CPLWorkerThreadPool)
 
-    std::vector<std::unique_ptr<CPLWorkerThread>> aWT{};
+    std::vector<std::thread> m_workers{};
     mutable std::mutex m_mutex{};
     std::condition_variable m_cv{};
-    volatile CPLWorkerThreadState eState = CPLWTS_OK;
+    void **m_initData{};
+    CPLThreadFunc m_initFunc{};
+    CPLWorkerThreadState eState = CPLWTS_OK;
     std::queue<std::function<void()>> jobQueue;
     int nPendingJobs = 0;
+    size_t nNumThreadsStarted = 0;
 
-    CPLList *psWaitingWorkerThreadsList = nullptr;
-    int nWaitingWorkerThreads = 0;
-
-    int m_nMaxThreads = 0;
-
-    static void WorkerThreadFunction(void *user_data);
-
+    void WorkerThreadFunction();
     void DeclareJobFinished();
-    std::function<void()> GetNextJob(CPLWorkerThread *psWorkerThread);
+    std::function<void()> GetNextJob();
 
   public:
     CPLWorkerThreadPool();
     explicit CPLWorkerThreadPool(int nThreads);
     ~CPLWorkerThreadPool();
 
+    void Stop();
     bool Setup(int nThreads, CPLThreadFunc pfnInitFunc, void **pasInitData);
     bool Setup(int nThreads, CPLThreadFunc pfnInitFunc, void **pasInitData,
                bool bWaitallStarted);
@@ -145,6 +137,7 @@ class CPL_DLL CPLJobQueue
         return m_poPool;
     }
 
+    bool SubmitJob(std::function<void()> func);
     bool SubmitJob(CPLThreadFunc pfnFunc, void *pData);
     void WaitCompletion(int nMaxRemainingJobs = 0);
     bool WaitEvent();

@@ -4556,107 +4556,45 @@ TEST_F(test_cpl, test_config_overrides_environment)
 // Test CPLWorkerThreadPool recursion
 TEST_F(test_cpl, CPLWorkerThreadPool_recursion)
 {
-    struct Context
+    using JobQueuePtr = std::unique_ptr<CPLJobQueue>;
+    using AtomInt = std::atomic<int>;
+
+    AtomInt nCounter{0};
+    CPLWorkerThreadPool oThreadPool(3);
+
+    auto requeue = [&oThreadPool, &nCounter]()
     {
-        CPLWorkerThreadPool oThreadPool{};
-        std::atomic<int> nCounter{0};
-        std::mutex mutex{};
-        std::condition_variable cv{};
-        bool you_can_leave = false;
-        int threadStarted = 0;
+        JobQueuePtr queue = oThreadPool.CreateJobQueue();
+
+        auto count = [&nCounter] { nCounter++; };
+
+        queue->SubmitJob(count);
+        queue->SubmitJob(count);
+        queue->SubmitJob(count);
+
+        queue.reset();
     };
 
-    Context ctxt;
-    ctxt.oThreadPool.Setup(2, nullptr, nullptr, /* waitAllStarted = */ true);
-
-    struct Data
     {
-        Context *psCtxt;
-        int iJob;
-        GIntBig nThreadLambda = 0;
-
-        Data(Context *psCtxtIn, int iJobIn) : psCtxt(psCtxtIn), iJob(iJobIn)
-        {
-        }
-
-        Data(const Data &) = default;
-    };
-
-    const auto lambda = [](void *pData)
-    {
-        auto psData = static_cast<Data *>(pData);
-        if (psData->iJob > 0)
-        {
-            // wait for both threads to be started
-            std::unique_lock<std::mutex> guard(psData->psCtxt->mutex);
-            psData->psCtxt->threadStarted++;
-            psData->psCtxt->cv.notify_one();
-            while (psData->psCtxt->threadStarted < 2)
-            {
-                psData->psCtxt->cv.wait(guard);
-            }
-        }
-
-        psData->nThreadLambda = CPLGetPID();
-        // fprintf(stderr, "lambda %d: " CPL_FRMT_GIB "\n",
-        //         psData->iJob, psData->nThreadLambda);
-        const auto lambda2 = [](void *pData2)
-        {
-            const auto psData2 = static_cast<Data *>(pData2);
-            const int iJob = psData2->iJob;
-            const int nCounter = psData2->psCtxt->nCounter++;
-            CPL_IGNORE_RET_VAL(nCounter);
-            const auto nThreadLambda2 = CPLGetPID();
-            // fprintf(stderr, "lambda2 job=%d, counter(before)=%d, thread="
-            // CPL_FRMT_GIB "\n", iJob, nCounter, nThreadLambda2);
-            if (iJob == 100 + 0)
-            {
-                ASSERT_TRUE(nThreadLambda2 != psData2->nThreadLambda);
-                // make sure that job 0 run in the other thread
-                // takes sufficiently long that job 2 has been submitted
-                // before it completes
-                std::unique_lock<std::mutex> guard(psData2->psCtxt->mutex);
-                // coverity[missing_lock:FALSE]
-                while (!psData2->psCtxt->you_can_leave)
-                {
-                    psData2->psCtxt->cv.wait(guard);
-                }
-            }
-            else if (iJob == 100 + 1 || iJob == 100 + 2)
-            {
-                ASSERT_TRUE(nThreadLambda2 == psData2->nThreadLambda);
-            }
-        };
-        auto poQueue = psData->psCtxt->oThreadPool.CreateJobQueue();
-        Data d0(*psData);
-        d0.iJob = 100 + d0.iJob * 3 + 0;
-        Data d1(*psData);
-        d1.iJob = 100 + d1.iJob * 3 + 1;
-        Data d2(*psData);
-        d2.iJob = 100 + d2.iJob * 3 + 2;
-        poQueue->SubmitJob(lambda2, &d0);
-        poQueue->SubmitJob(lambda2, &d1);
-        poQueue->SubmitJob(lambda2, &d2);
-        if (psData->iJob == 0)
-        {
-            std::lock_guard<std::mutex> guard(psData->psCtxt->mutex);
-            psData->psCtxt->you_can_leave = true;
-            psData->psCtxt->cv.notify_one();
-        }
-    };
-    {
-        auto poQueue = ctxt.oThreadPool.CreateJobQueue();
-        Data data0(&ctxt, 0);
-        poQueue->SubmitJob(lambda, &data0);
+        JobQueuePtr queue = oThreadPool.CreateJobQueue();
+        queue->SubmitJob([&] { requeue(); });
+        queue.reset();
     }
+    ASSERT_EQ(nCounter, 3);
     {
-        auto poQueue = ctxt.oThreadPool.CreateJobQueue();
-        Data data1(&ctxt, 1);
-        Data data2(&ctxt, 2);
-        poQueue->SubmitJob(lambda, &data1);
-        poQueue->SubmitJob(lambda, &data2);
+        JobQueuePtr queue = oThreadPool.CreateJobQueue();
+        queue->SubmitJob([&] { requeue(); });
+        queue->SubmitJob([&] { requeue(); });
+        queue.reset();
     }
-    ASSERT_EQ(ctxt.nCounter, 3 * 3);
+    ASSERT_EQ(nCounter, 9);
+    oThreadPool.Stop();
+    {
+        JobQueuePtr queue = oThreadPool.CreateJobQueue();
+        queue->SubmitJob([&] { requeue(); });
+        queue.reset();
+    }
+    ASSERT_EQ(nCounter, 9);
 }
 
 // Test /vsimem/ PRead() implementation
