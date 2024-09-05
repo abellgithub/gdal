@@ -48,6 +48,12 @@ class Progress;
 /// in the destination band.
 class ViewshedExecutor
 {
+    struct Cell
+    {
+        double val{};
+        double result{};
+    };
+
   public:
     ViewshedExecutor(GDALRasterBand &srcBand, GDALRasterBand &dstBand, int nX,
                      int nY, const Window &oOutExtent, const Window &oCurExtent,
@@ -74,29 +80,23 @@ class ViewshedExecutor
 
     double calcHeightAdjFactor();
     void setOutput(double &dfResult, double &dfCellVal, double dfZ);
-    bool readLine(int nLine, double *data);
-    bool writeLine(int nLine, std::vector<double> &vResult);
-    bool processLine(int nLine, std::vector<double> &vLastLineVal);
-    bool processFirstLine(std::vector<double> &vLastLineVal);
+    bool readLine(int nLine, std::vector<Cell> &vThisLine);
+    bool writeLine(int nLine, std::vector<Cell> &vThisLine);
+    bool processLine(int nLine, std::vector<Cell> &vLastLine);
+    bool processFirstLine(std::vector<Cell> &vLastLine);
     void processFirstLineLeft(int iStart, int iEnd,
-                              std::vector<double> &vResult,
-                              std::vector<double> &vThisLineVal);
+                              std::vector<Cell> &vThisLine);
     void processFirstLineRight(int iStart, int iEnd,
-                               std::vector<double> &vResult,
-                               std::vector<double> &vThisLineVal);
+                               std::vector<Cell> &vThisLine);
     void processFirstLineTopOrBottom(int iLeft, int iRight,
-                                     std::vector<double> &vResult,
-                                     std::vector<double> &vThisLineVal);
+                                     std::vector<Cell> &vThisLine);
     void processLineLeft(int nYOffset, int iStart, int iEnd,
-                         std::vector<double> &vResult,
-                         std::vector<double> &vThisLineVal,
-                         std::vector<double> &vLastLineVal);
+                         std::vector<Cell> &vThisLine,
+                         std::vector<Cell> &vLastLine);
     void processLineRight(int nYOffset, int iStart, int iEnd,
-                          std::vector<double> &vResult,
-                          std::vector<double> &vThisLineVal,
-                          std::vector<double> &vLastLineVal);
-    std::pair<int, int> adjustHeight(int iLine,
-                                     std::vector<double> &thisLineVal);
+                          std::vector<Cell> &vThisLine,
+                          std::vector<Cell> &vLastLine);
+    std::pair<int, int> adjustHeight(int iLine, std::vector<Cell> &vThisLine);
 };
 
 }  // namespace viewshed
