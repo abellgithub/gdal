@@ -230,12 +230,6 @@ bool ViewshedExecutor::writeLine(int nLine, std::vector<Cell> &vThisLine)
             *p++ = vThisLine[i].result;
         dataType = GDT_Float64;
     }
-    /**
-    std::vector<double> line(vThisLine.size());
-
-    for (size_t i = 0; i < line.size(); ++i)
-        line[i] = vThisLine[i].result;
-    **/
 
     int status = 0;
     {
