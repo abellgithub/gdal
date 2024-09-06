@@ -182,12 +182,16 @@ void ViewshedExecutor::setOutput(double &dfResult, double &dfCellVal,
 /// @return  Success or failure.
 bool ViewshedExecutor::readLine(int nLine, std::vector<Cell> &vThisLine)
 {
-    std::lock_guard g(iMutex);
-
-    if (m_srcBand.RasterIO(GF_Read, oOutExtent.xStart, nLine,
-                           oOutExtent.xSize(), 1, &vThisLine[0].val,
-                           oOutExtent.xSize(), 1, GDT_Float64, sizeof(Cell), 0,
-                           nullptr))
+    std::vector<double> line(vThisLine.size());
+    int status = 0;
+    {
+        // GDALRasterIO isn't thread-safe.
+        std::lock_guard g(iMutex);
+        status = m_srcBand.RasterIO(
+            GF_Read, oOutExtent.xStart, nLine, oOutExtent.xSize(), 1,
+            line.data(), oOutExtent.xSize(), 1, GDT_Float64, 0, 0, nullptr);
+    }
+    if (status)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "RasterIO error when reading DEM at position (%d,%d), "
@@ -195,6 +199,9 @@ bool ViewshedExecutor::readLine(int nLine, std::vector<Cell> &vThisLine)
                  oOutExtent.xStart, nLine, oOutExtent.xSize(), 1);
         return false;
     }
+
+    for (size_t i = 0; i < line.size(); ++i)
+        vThisLine[i].val = line[i];
     return true;
 }
 
@@ -205,13 +212,41 @@ bool ViewshedExecutor::readLine(int nLine, std::vector<Cell> &vThisLine)
 /// @return  True on success, false otherwise.
 bool ViewshedExecutor::writeLine(int nLine, std::vector<Cell> &vThisLine)
 {
-    // GDALRasterIO isn't thread-safe.
-    std::lock_guard g(oMutex);
+    std::vector<uint8_t> line;
+    GDALDataType dataType;
 
-    if (m_dstBand.RasterIO(GF_Write, 0, nLine - oOutExtent.yStart,
-                           oOutExtent.xSize(), 1, &vThisLine[0].result,
-                           oOutExtent.xSize(), 1, GDT_Float64, sizeof(Cell), 0,
-                           nullptr))
+    if (oOpts.outputMode == OutputMode::Normal)
+    {
+        line.resize(vThisLine.size());
+        for (size_t i = 0; i < vThisLine.size(); ++i)
+            line[i] = static_cast<uint8_t>(vThisLine[i].result);
+        dataType = GDT_Byte;
+    }
+    else
+    {
+        line.resize(vThisLine.size() * sizeof(double));
+        double *p = reinterpret_cast<double *>(line.data());
+        for (size_t i = 0; i < vThisLine.size(); ++i)
+            *p++ = vThisLine[i].result;
+        dataType = GDT_Float64;
+    }
+    /**
+    std::vector<double> line(vThisLine.size());
+
+    for (size_t i = 0; i < line.size(); ++i)
+        line[i] = vThisLine[i].result;
+    **/
+
+    int status = 0;
+    {
+        // GDALRasterIO isn't thread-safe.
+        std::lock_guard g(oMutex);
+
+        status = m_dstBand.RasterIO(
+            GF_Write, 0, nLine - oOutExtent.yStart, oOutExtent.xSize(), 1,
+            line.data(), oOutExtent.xSize(), 1, dataType, 0, 0, nullptr);
+    }
+    if (status)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "RasterIO error when writing target raster at position "
