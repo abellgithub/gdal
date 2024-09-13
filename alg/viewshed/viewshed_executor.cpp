@@ -32,6 +32,9 @@
 #include <cassert>
 #include <limits>
 
+//ABELL
+#include <iostream>
+
 #include "viewshed_executor.h"
 #include "progress.h"
 
@@ -111,6 +114,7 @@ double doMax(int nXOffset, int nYOffset, double dfThisPrev, double dfLast,
 
 /// Constructor -- the viewshed algorithm executor
 /// @param srcBand  Source raster band
+/// @param sdBand  Destination raster band
 /// @param dstBand  Destination raster band
 /// @param nX  X position of observer
 /// @param nY  Y position of observer
@@ -119,13 +123,30 @@ double doMax(int nXOffset, int nYOffset, double dfThisPrev, double dfLast,
 /// @param opts  Configuration options.
 /// @param progress  Reference to the progress tracker.
 ViewshedExecutor::ViewshedExecutor(GDALRasterBand &srcBand,
+                                   GDALRasterBand &sdBand,
                                    GDALRasterBand &dstBand, int nX, int nY,
                                    const Window &outExtent,
                                    const Window &curExtent, const Options &opts,
                                    Progress &progress)
-    : m_pool(4), m_srcBand(srcBand), m_dstBand(dstBand), oOutExtent(outExtent),
-      oCurExtent(curExtent), m_nX(nX - oOutExtent.xStart), m_nY(nY),
-      oOpts(opts), oProgress(progress),
+    : m_pool(4), m_srcBand(srcBand), m_sdBand(sdBand), m_dstBand(dstBand),
+      oOutExtent(outExtent), oCurExtent(curExtent),
+      m_nX(nX - oOutExtent.xStart), m_nY(nY), oOpts(opts), oProgress(progress),
+      m_dfMaxDistance2(opts.maxDistance * opts.maxDistance)
+{
+    if (m_dfMaxDistance2 == 0)
+        m_dfMaxDistance2 = std::numeric_limits<double>::max();
+    m_srcBand.GetDataset()->GetGeoTransform(m_adfTransform.data());
+}
+
+// No SD Band
+ViewshedExecutor::ViewshedExecutor(GDALRasterBand &srcBand,
+                                   GDALRasterBand &dstBand, int nX, int nY,
+                                   const Window &outExtent,
+                                   const Window &curExtent, const Options &opts,
+                                   Progress &progress)
+    : m_pool(4), m_srcBand(srcBand), m_sdBand(m_srcBand), m_dstBand(dstBand),
+      oOutExtent(outExtent), oCurExtent(curExtent),
+      m_nX(nX - oOutExtent.xStart), m_nY(nY), oOpts(opts), oProgress(progress),
       m_dfMaxDistance2(opts.maxDistance * opts.maxDistance)
 {
     if (m_dfMaxDistance2 == 0)
@@ -162,17 +183,48 @@ double ViewshedExecutor::calcHeightAdjFactor()
 /// dfCellVal  Reference to the current cell height. Replace with observable height.
 /// dfZ  Minimum observable height at cell.
 void ViewshedExecutor::setOutput(double &dfResult, double &dfCellVal,
-                                 double dfZ)
+                                 double &dfSdCellVal, double dfZ, double dfSdZ)
 {
     if (oOpts.outputMode != OutputMode::Normal)
     {
         dfResult += (dfZ - dfCellVal);
         dfResult = std::max(0.0, dfResult);
+        dfSdCellVal = std::max(dfSdCellVal, dfSdZ);
     }
     else
-        dfResult = (dfCellVal + oOpts.targetHeight < dfZ) ? oOpts.invisibleVal
-                                                          : oOpts.visibleVal;
-    dfCellVal = std::max(dfCellVal, dfZ);
+    {
+        /**
+        std::cerr << "cell height/dfz/dfsdz/sd = " <<
+            (dfCellVal + oOpts.targetHeight) << "/" << dfZ << "/" << dfSdZ << "/" <<
+                dfSdCellVal;
+        **/
+        if (dfZ <= dfCellVal + oOpts.targetHeight)
+        {
+            //            std::cerr << " - visible!\n";
+            dfResult = oOpts.visibleVal;
+            if (dfSdCellVal > 1)      // Changing SD to height.
+                dfSdCellVal = dfSdZ;  // See-through case.
+            else
+                dfSdCellVal = dfCellVal;  // Blocking case
+        }
+        else if (dfSdZ <= dfCellVal + oOpts.targetHeight)
+        {
+            //            std::cerr << " - maybe visible!\n";
+            dfResult = oOpts.maybeVisibleVal;
+            if (dfSdCellVal > 1)      // Changing SD to height.
+                dfSdCellVal = dfSdZ;  // See-through case.
+            else
+                dfSdCellVal = dfCellVal;  // Blocking case
+            dfCellVal = dfZ;
+        }
+        else
+        {
+            //            std::cerr << " - not visible!\n";
+            dfResult = oOpts.invisibleVal;
+            dfCellVal = dfZ;
+            dfSdCellVal = dfSdZ;
+        }
+    }
 }
 
 /// Read a line of raster data.
@@ -199,9 +251,29 @@ bool ViewshedExecutor::readLine(int nLine, std::vector<Cell> &vThisLine)
                  oOutExtent.xStart, nLine, oOutExtent.xSize(), 1);
         return false;
     }
-
     for (size_t i = 0; i < line.size(); ++i)
         vThisLine[i].val = line[i];
+
+    int sdStatus = 0;
+    double nodata = std::numeric_limits<double>::max();
+    {
+        std::lock_guard g(iMutex);
+        nodata = m_sdBand.GetNoDataValue();
+        sdStatus = m_sdBand.RasterIO(
+            GF_Read, oOutExtent.xStart, nLine, oOutExtent.xSize(), 1,
+            line.data(), oOutExtent.xSize(), 1, GDT_Float64, 0, 0, nullptr);
+    }
+    if (sdStatus)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "RasterIO error when reading SD band at position (%d,%d), "
+                 "size (%d,%d)",
+                 oOutExtent.xStart, nLine, oOutExtent.xSize(), 1);
+        return false;
+    }
+    for (size_t i = 0; i < line.size(); ++i)
+        vThisLine[i].sd = (line[i] == nodata ? 1000.0 : line[i]);
+
     return true;
 }
 
@@ -358,7 +430,6 @@ bool ViewshedExecutor::processFirstLine(std::vector<Cell> &vLastLine)
         pQueue->SubmitJob(
             [&, left = iLeft]()
             { processFirstLineLeft(m_nX - 1, left - 1, vThisLine); });
-
         pQueue->SubmitJob(
             [&, right = iRight]()
             { processFirstLineRight(m_nX + 1, right, vThisLine); });
@@ -390,7 +461,8 @@ void ViewshedExecutor::processFirstLineTopOrBottom(int iLeft, int iRight,
         if (oOpts.outputMode == OutputMode::Normal)
             c.result = oOpts.visibleVal;
         else
-            setOutput(c.result, c.val, c.val);
+            //ABELL - Check SD height here. Perhaps 0 if SD < 1?
+            setOutput(c.result, c.val, c.sd, c.val, c.val);
     }
     for (int i = 0; i < iLeft; ++i)
         vThisLine[i].result = oOpts.outOfRangeVal;
@@ -417,9 +489,12 @@ void ViewshedExecutor::processFirstLineLeft(int iStart, int iEnd,
     {
         Cell &c = vThisLine[iStart];
         if (oOpts.outputMode == OutputMode::Normal)
+        {
             c.result = oOpts.visibleVal;
+            c.sd = c.val;  // Set the SD height to the height.
+        }
         else
-            setOutput(c.result, c.val, c.val);
+            setOutput(c.result, c.val, c.sd, c.val, c.val);
         iStart--;
     }
 
@@ -429,7 +504,8 @@ void ViewshedExecutor::processFirstLineLeft(int iStart, int iEnd,
         Cell &c = vThisLine[iPixel];
         int nXOffset = std::abs(iPixel - m_nX);
         double dfZ = CalcHeightLine(nXOffset, vThisLine[iPixel + 1].val);
-        setOutput(c.result, c.val, dfZ);
+        double dfSdZ = CalcHeightLine(nXOffset, vThisLine[iPixel + 1].sd);
+        setOutput(c.result, c.val, c.sd, dfZ, dfSdZ);
     }
     // For cells outside of the [start, end) range, set the outOfRange value.
     for (int i = 0; i < iEnd + 1; ++i)
@@ -459,7 +535,8 @@ void ViewshedExecutor::processFirstLineRight(int iStart, int iEnd,
         if (oOpts.outputMode == OutputMode::Normal)
             c.result = oOpts.visibleVal;
         else
-            setOutput(c.result, c.val, c.val);
+            //ABELL Perhaps set the last value to zero if SD < 1.
+            setOutput(c.result, c.val, c.sd, c.val, c.val);
         iStart++;
     }
 
@@ -469,7 +546,8 @@ void ViewshedExecutor::processFirstLineRight(int iStart, int iEnd,
         Cell &c = vThisLine[iPixel];
         int nXOffset = std::abs(iPixel - m_nX);
         double dfZ = CalcHeightLine(nXOffset, vThisLine[iPixel - 1].val);
-        setOutput(c.result, c.val, dfZ);
+        double dfSdZ = CalcHeightLine(nXOffset, vThisLine[iPixel - 1].sd);
+        setOutput(c.result, c.val, c.sd, dfZ, dfSdZ);
     }
     // For cells outside of the [start, end) range, set the outOfRange value.
     for (int i = iEnd; i < oOutExtent.xSize(); ++i)
@@ -503,7 +581,8 @@ void ViewshedExecutor::processLineLeft(int nYOffset, int iStart, int iEnd,
         if (oOpts.outputMode == OutputMode::Normal)
             c.result = oOpts.visibleVal;
         else
-            setOutput(c.result, c.val, c.val);
+            //ABELL Perhaps set the last value to zero if SD < 1.
+            setOutput(c.result, c.val, c.sd, c.val, c.val);
         iStart--;
     }
 
@@ -512,17 +591,29 @@ void ViewshedExecutor::processLineLeft(int nYOffset, int iStart, int iEnd,
     {
         int nXOffset = std::abs(iPixel - m_nX);
         double dfZ;
+        double dfSdZ;
         if (nXOffset == nYOffset)
         {
             if (nXOffset == 1)
+            {
                 dfZ = vThisLine[iPixel].val;
+                dfSdZ = vThisLine[iPixel].val;  //ABELL - Check this.
+            }
             else
+            {
                 dfZ = CalcHeightLine(nXOffset, vLastLine[iPixel + 1].val);
+                dfSdZ = CalcHeightLine(nXOffset, vLastLine[iPixel + 1].sd);
+            }
         }
         else
+        {
             dfZ = oZcalc(nXOffset, nYOffset, vThisLine[iPixel + 1].val,
                          vLastLine[iPixel].val, vLastLine[iPixel + 1].val);
-        setOutput(vThisLine[iPixel].result, vThisLine[iPixel].val, dfZ);
+            dfSdZ = oZcalc(nXOffset, nYOffset, vThisLine[iPixel + 1].sd,
+                           vLastLine[iPixel].sd, vLastLine[iPixel + 1].sd);
+        }
+        setOutput(vThisLine[iPixel].result, vThisLine[iPixel].val,
+                  vThisLine[iPixel].sd, dfZ, dfSdZ);
     }
 
     // For cells outside of the [start, end) range, set the outOfRange value.
@@ -557,7 +648,8 @@ void ViewshedExecutor::processLineRight(int nYOffset, int iStart, int iEnd,
         if (oOpts.outputMode == OutputMode::Normal)
             c.result = oOpts.visibleVal;
         else
-            setOutput(c.result, c.val, c.val);
+            //ABELL - Here too.
+            setOutput(c.result, c.val, c.sd, c.val, c.val);
         iStart++;
     }
 
@@ -566,17 +658,29 @@ void ViewshedExecutor::processLineRight(int nYOffset, int iStart, int iEnd,
     {
         int nXOffset = std::abs(iPixel - m_nX);
         double dfZ;
+        double dfSdZ;
         if (nXOffset == nYOffset)
         {
             if (nXOffset == 1)
+            {
                 dfZ = vThisLine[iPixel].val;
+                dfSdZ = vThisLine[iPixel].val;  //ABELL - Here.
+            }
             else
+            {
                 dfZ = CalcHeightLine(nXOffset, vLastLine[iPixel - 1].val);
+                dfSdZ = CalcHeightLine(nXOffset, vLastLine[iPixel - 1].sd);
+            }
         }
         else
+        {
             dfZ = oZcalc(nXOffset, nYOffset, vThisLine[iPixel - 1].val,
                          vLastLine[iPixel].val, vLastLine[iPixel - 1].val);
-        setOutput(vThisLine[iPixel].result, vThisLine[iPixel].val, dfZ);
+            dfSdZ = oZcalc(nXOffset, nYOffset, vThisLine[iPixel - 1].sd,
+                           vLastLine[iPixel].sd, vLastLine[iPixel - 1].sd);
+        }
+        setOutput(vThisLine[iPixel].result, vThisLine[iPixel].val,
+                  vThisLine[iPixel].sd, dfZ, dfSdZ);
     }
 
     // For cells outside of the [start, end) range, set the outOfRange value.
@@ -613,11 +717,19 @@ bool ViewshedExecutor::processLine(int nLine, std::vector<Cell> &vLastLine)
         if (iLeft < iRight)
         {
             double dfZ;
+            double dfSdZ;
             if (std::abs(nYOffset) == 1)
+            {
                 dfZ = vThisLine[m_nX].val;
+                dfSdZ = vThisLine[m_nX].val;
+            }
             else
+            {
                 dfZ = CalcHeightLine(nYOffset, vLastLine[m_nX].val);
-            setOutput(vThisLine[m_nX].result, vThisLine[m_nX].val, dfZ);
+                dfSdZ = CalcHeightLine(nYOffset, vLastLine[m_nX].sd);
+            }
+            setOutput(vThisLine[m_nX].result, vThisLine[m_nX].val,
+                      vThisLine[m_nX].sd, dfZ, dfSdZ);
         }
         else
             vThisLine[m_nX].result = oOpts.outOfRangeVal;

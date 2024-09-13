@@ -87,6 +87,7 @@ class Viewshed
     Window oCurExtent;
     DatasetPtr poDstDS;
     GDALRasterBand *pSrcBand;
+    GDALRasterBand *pSdBand;
 
     DatasetPtr execute(int nX, int nY, const std::string &outFilename);
     void setOutput(double &dfResult, double &dfCellVal, double dfZ);

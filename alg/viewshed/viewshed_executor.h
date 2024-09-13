@@ -52,9 +52,14 @@ class ViewshedExecutor
     {
         double val{};
         double result{};
+        double sd{};
     };
 
   public:
+    ViewshedExecutor(GDALRasterBand &srcBand, GDALRasterBand &sdBand,
+                     GDALRasterBand &dstBand, int nX, int nY,
+                     const Window &oOutExtent, const Window &oCurExtent,
+                     const Options &opts, Progress &oProgress);
     ViewshedExecutor(GDALRasterBand &srcBand, GDALRasterBand &dstBand, int nX,
                      int nY, const Window &oOutExtent, const Window &oCurExtent,
                      const Options &opts, Progress &oProgress);
@@ -63,6 +68,7 @@ class ViewshedExecutor
   private:
     CPLWorkerThreadPool m_pool;
     GDALRasterBand &m_srcBand;
+    GDALRasterBand &m_sdBand;
     GDALRasterBand &m_dstBand;
     const Window oOutExtent;
     const Window oCurExtent;
@@ -79,7 +85,8 @@ class ViewshedExecutor
     double (*oZcalc)(int, int, double, double, double){};
 
     double calcHeightAdjFactor();
-    void setOutput(double &dfResult, double &dfCellVal, double dfZ);
+    void setOutput(double &dfResult, double &dfCellVal, double &sdCellVal,
+                   double dfZ, double dfSdZ);
     bool readLine(int nLine, std::vector<Cell> &vThisLine);
     bool writeLine(int nLine, std::vector<Cell> &vThisLine);
     bool processLine(int nLine, std::vector<Cell> &vLastLine);

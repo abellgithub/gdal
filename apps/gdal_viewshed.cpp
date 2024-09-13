@@ -176,6 +176,13 @@ Options parseArgs(GDALArgumentParser &argParser, const CPLStringList &aosArgv)
         .nargs(1)
         .help(_("Spacing between observer cells when using cumulative mode."));
 
+    argParser.add_argument("-sd")
+        .store_into(opts.sdFilename)
+        .metavar("<value>")
+        .nargs(1)
+        .help(_("Name of file whose first band represents the standard "
+                "deviation of the raster."));
+
     argParser.add_quiet_argument(&localOpts.bQuiet);
 
     argParser.add_argument("src_filename")

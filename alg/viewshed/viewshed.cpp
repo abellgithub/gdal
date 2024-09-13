@@ -310,6 +310,13 @@ bool Viewshed::calcExtents(int nX, int nY,
 bool Viewshed::run(GDALRasterBandH band, GDALProgressFunc pfnProgress,
                    void *pProgressArg)
 {
+    DatasetPtr sdDataset;
+    if (oOpts.sdFilename.size())
+    {
+        GDALDatasetH ds = GDALOpen(oOpts.sdFilename.c_str(), GA_ReadOnly);
+        sdDataset.reset(GDALDataset::FromHandle(ds));
+        pSdBand = sdDataset->GetRasterBand(1);
+    }
     pSrcBand = static_cast<GDALRasterBand *>(band);
 
     std::array<double, 6> adfFwdTransform;
@@ -348,8 +355,8 @@ bool Viewshed::run(GDALRasterBandH band, GDALProgressFunc pfnProgress,
 
     // Execute the viewshed algorithm.
     GDALRasterBand *pDstBand = poDstDS->GetRasterBand(1);
-    ViewshedExecutor executor(*pSrcBand, *pDstBand, nX, nY, oOutExtent,
-                              oCurExtent, oOpts, oProgress);
+    ViewshedExecutor executor(*pSrcBand, *pSdBand, *pDstBand, nX, nY,
+                              oOutExtent, oCurExtent, oOpts, oProgress);
     executor.run();
     oProgress.emit(1);
     return static_cast<bool>(poDstDS);
