@@ -940,7 +940,7 @@ void GDALDriver::DefaultCopyMetadata(GDALDataset *poSrcDS, GDALDataset *poDstDS,
             if ((!papszSrcMDD || CSLFindString(papszSrcMDD, pszDomain) >= 0) &&
                 CSLFindString(papszExcludedDomains, pszDomain) < 0)
             {
-                char **papszMD = poSrcDS->GetMetadata(pszDomain);
+                CSLConstList papszMD = poSrcDS->GetMetadata(pszDomain);
                 if (papszMD)
                     poDstDS->SetMetadata(papszMD, pszDomain);
             }
@@ -1672,7 +1672,8 @@ CPLErr GDALDriver::Delete(const char *pszFilename)
     /* -------------------------------------------------------------------- */
     /*      Collect file list.                                              */
     /* -------------------------------------------------------------------- */
-    GDALDatasetH hDS = GDALOpenEx(pszFilename, 0, nullptr, nullptr, nullptr);
+    GDALDatasetH hDS = GDALOpenEx(pszFilename, GDAL_OF_VERBOSE_ERROR, nullptr,
+                                  nullptr, nullptr);
 
     if (hDS == nullptr)
     {
@@ -2378,14 +2379,23 @@ int GDALValidateOptions(const char *pszOptionList,
                 {
                     break;
                 }
-                const char *pszAlias = CPLGetXMLValue(
-                    psChildNode, "alias",
-                    CPLGetXMLValue(psChildNode, "deprecated_alias", ""));
-                if (EQUAL(pszAlias, pszKey))
+                const char *pszAlias =
+                    CPLGetXMLValue(psChildNode, "alias", nullptr);
+                const char *pszDeprecatedAlias =
+                    pszAlias ? nullptr
+                             : CPLGetXMLValue(psChildNode, "deprecated_alias",
+                                              nullptr);
+                if (!pszAlias && pszDeprecatedAlias)
+                    pszAlias = pszDeprecatedAlias;
+                if (pszAlias && EQUAL(pszAlias, pszKey))
                 {
-                    CPLDebug("GDAL",
-                             "Using deprecated alias '%s'. New name is '%s'",
-                             pszAlias, pszOptionName);
+                    if (pszDeprecatedAlias)
+                    {
+                        CPLDebug(
+                            "GDAL",
+                            "Using deprecated alias '%s'. New name is '%s'",
+                            pszAlias, pszOptionName);
+                    }
                     break;
                 }
             }

@@ -45,6 +45,7 @@ class GDALGroup;
 class GDALMDArray;
 class GDALRasterBand;
 class GDALRelationship;
+class GDALOpenInfo;
 
 //! @cond Doxygen_Suppress
 typedef struct GDALSQLParseInfo GDALSQLParseInfo;
@@ -223,7 +224,12 @@ class CPL_DLL GDALDataset : public GDALMajorObject
   public:
     ~GDALDataset() override;
 
-    virtual CPLErr Close();
+    virtual CPLErr Close(GDALProgressFunc pfnProgress = nullptr,
+                         void *pProgressData = nullptr);
+
+    virtual bool GetCloseReportsProgress() const;
+
+    virtual bool CanReopenWithCurrentDescription() const;
 
     int GetRasterXSize() const;
     int GetRasterYSize() const;
@@ -511,6 +517,31 @@ class CPL_DLL GDALDataset : public GDALMajorObject
                                 GDALProgressFunc pfnProgress,
                                 void *pProgressData, CSLConstList papszOptions);
 
+    CPLErr GetInterBandCovarianceMatrix(
+        double *padfCovMatrix, size_t nSize, int nBandCount = 0,
+        const int *panBandList = nullptr, bool bApproxOK = false,
+        bool bForce = false, bool bWriteIntoMetadata = true,
+        int nDeltaDegreeOfFreedom = 1, GDALProgressFunc pfnProgress = nullptr,
+        void *pProgressData = nullptr);
+
+    std::vector<double> GetInterBandCovarianceMatrix(
+        int nBandCount = 0, const int *panBandList = nullptr,
+        bool bApproxOK = false, bool bForce = false,
+        bool bWriteIntoMetadata = true, int nDeltaDegreeOfFreedom = 1,
+        GDALProgressFunc pfnProgress = nullptr, void *pProgressData = nullptr);
+
+    CPLErr ComputeInterBandCovarianceMatrix(
+        double *padfCovMatrix, size_t nSize, int nBandCount = 0,
+        const int *panBandList = nullptr, bool bApproxOK = false,
+        bool bWriteIntoMetadata = true, int nDeltaDegreeOfFreedom = 1,
+        GDALProgressFunc pfnProgress = nullptr, void *pProgressData = nullptr);
+
+    std::vector<double> ComputeInterBandCovarianceMatrix(
+        int nBandCount = 0, const int *panBandList = nullptr,
+        bool bApproxOK = false, bool bWriteIntoMetadata = true,
+        int nDeltaDegreeOfFreedom = 1, GDALProgressFunc pfnProgress = nullptr,
+        void *pProgressData = nullptr);
+
 #ifndef DOXYGEN_XML
     void ReportError(CPLErr eErrClass, CPLErrorNum err_no, const char *fmt,
                      ...) const CPL_PRINT_FUNC_FORMAT(4, 5);
@@ -520,7 +551,7 @@ class CPL_DLL GDALDataset : public GDALMajorObject
         CPL_PRINT_FUNC_FORMAT(4, 5);
 #endif
 
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
 
 // Only defined when Doxygen enabled
 #ifdef DOXYGEN_SKIP
@@ -561,6 +592,11 @@ class CPL_DLL GDALDataset : public GDALMajorObject
                                      papszAllowedDrivers, papszOpenOptions,
                                      papszSiblingFiles));
     }
+
+    static std::unique_ptr<GDALDataset>
+    Open(GDALOpenInfo *poOpenInfo,
+         const char *const *papszAllowedDrivers = nullptr,
+         const char *const *papszOpenOptions = nullptr);
 
     /** Object returned by GetFeatures() iterators */
     struct FeatureLayerPair

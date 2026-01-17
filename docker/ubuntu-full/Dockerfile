@@ -483,7 +483,7 @@ ARG WITH_DEBUG_SYMBOLS=no
 
 # Refresh grids
 ARG PROJ_DATUMGRID_LATEST_LAST_MODIFIED
-ARG PROJ_INSTALL_PREFIX=/usr/local
+ARG PROJ_INSTALL_PREFIX=/usr/local/gdal-internal
 COPY ./bh-proj.sh /buildscripts/bh-proj.sh
 # We build PROJ a first time, just to build the projsync utility if grids need
 # to be refreshed. We will rebuild just afterwards, but depending on the
@@ -499,7 +499,7 @@ RUN --mount=type=cache,id=ubuntu-full-proj,target=$HOME/.cache \
       . /buildscripts/bh-set-envvars.sh \
       && rm -f /tmp/proj_grids/proj_grids_not_included \
       && DESTDIR=/build_tmp_proj /buildscripts/bh-proj.sh \
-      && LD_LIBRARY_PATH=/build_tmp_proj/usr/local/lib /build_tmp_proj/usr/local/bin/projsync --target-dir /tmp/proj_grids --all \
+      && LD_LIBRARY_PATH=/build_tmp_proj/${PROJ_INSTALL_PREFIX}/lib /build_tmp_proj/${PROJ_INSTALL_PREFIX}/bin/projsync --target-dir /tmp/proj_grids --all \
       && rm -rf /build_tmp_proj \
     ); fi
 
@@ -522,6 +522,10 @@ ARG GDAL_REPOSITORY=OSGeo/gdal
 COPY ./bh-gdal.sh /buildscripts/bh-gdal.sh
 RUN --mount=type=cache,id=ubuntu-full-gdal,target=$HOME/.cache \
     . /buildscripts/bh-set-envvars.sh \
+    # Forcefully remove the development files for libproj so GDAL cannot
+    # include the wrong header. This is the last step of the build container,
+    # so we can break things without anything else suffering.
+    && dpkg --force depends -r libproj-dev \
     && /buildscripts/bh-gdal.sh
 
 RUN mkdir -p /build_thirdparty/opt
@@ -544,7 +548,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     # PROJ dependencies
     && apt-get install -y \
         libsqlite3-0 libtiff6 libcurl4 \
-        curl unzip ca-certificates \
+        unzip ca-certificates \
     # GDAL dependencies
     && apt-get install -y \
         bash-completion libopenjp2-7 libcairo2 python3-numpy \
@@ -571,8 +575,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     # Install JRE with --no-install-recommends, otherwise it draws default-jre, which draws systemd, which fails to install when running the arm64v8/ubuntu:24.04 image on a 64bit host
     && apt-get install -y --no-install-recommends openjdk-"$JAVA_VERSION"-jre \
     # Install Arrow C++
-    && apt-get install -y -V ca-certificates lsb-release \
+    && apt-get install -y -V curl ca-certificates lsb-release \
     && curl -LO -fsS https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
+    && apt-get purge -y curl \
     && apt-get install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
     && apt-get update \
     && apt-get install -y -V libarrow${ARROW_SOVERSION} \
@@ -581,8 +586,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y -V libarrow-compute${ARROW_SOVERSION}
 
 # Install libduckdb
-ARG DUCKDB_VERSION=v1.4.1
-RUN if test "$(uname -p)" = "x86_64"; then \
+ARG DUCKDB_VERSION=v1.4.3
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && if test "$(uname -p)" = "x86_64"; then \
     curl -LO -fsS https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/libduckdb-linux-amd64.zip \
     && unzip libduckdb-linux-amd64.zip libduckdb.so \
     && mv libduckdb.so /usr/lib/x86_64-linux-gnu \
@@ -592,14 +602,16 @@ RUN if test "$(uname -p)" = "x86_64"; then \
     && unzip libduckdb-linux-arm64.zip libduckdb.so \
     && mv libduckdb.so /usr/lib/aarch64-linux-gnu \
     && rm -f libduckdb-linux-arm64.zip; \
-    fi
+    fi \
+    && apt-get purge -y curl
 
 ARG WITH_ORACLE=
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
   if test "$(uname -p)" = "x86_64"; then \
   if echo "$WITH_ORACLE" | grep -Eiq "^(y(es)?|1|true)$" ; then ( \
-      apt-get update \
+      export DEBIAN_FRONTEND=noninteractive \
+      && apt-get update \
       && apt-get install -y -V libaio1t64 \
       && ln -s libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 \
   ) ; fi \
@@ -610,7 +622,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY --from=builder  /build_thirdparty/usr/ /usr/
 COPY --from=builder  /build_thirdparty/opt/ /opt/
 
-ARG PROJ_INSTALL_PREFIX=/usr/local
+ARG PROJ_INSTALL_PREFIX=/usr/local/gdal-internal
 COPY --from=builder  /tmp/proj_grids/* ${PROJ_INSTALL_PREFIX}/share/proj/
 
 COPY --from=builder  /build${PROJ_INSTALL_PREFIX}/share/proj/ ${PROJ_INSTALL_PREFIX}/share/proj/
@@ -633,6 +645,7 @@ RUN ogrinfo ADBC::memory: -oo ADBC_DRIVER=libduckdb.so -oo PRELUDE_STATEMENTS="I
 RUN echo "source /usr/share/bash-completion/bash_completion" >> /root/.bashrc
 
 # Set tcmalloc as the allocator to improve multi-threaded performance
-ENV LD_PRELOAD=libtcmalloc_minimal.so.4
+ENV LD_PRELOAD=libtcmalloc_minimal.so.4 \
+    PATH="${PATH}:/usr/local/gdal-internal/bin"
 
 CMD ["/bin/bash", "-l"]

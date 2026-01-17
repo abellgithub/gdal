@@ -287,7 +287,7 @@ class GDALGeoPackageDataset final : public OGRSQLiteBaseDataSource,
     std::map<std::string, std::unique_ptr<GDALDataset>> m_oCachedRasterDS{};
 
     bool CloseDB();
-    CPLErr Close() override;
+    CPLErr Close(GDALProgressFunc = nullptr, void * = nullptr) override;
 
     CPL_DISALLOW_COPY_ASSIGN(GDALGeoPackageDataset)
 
@@ -297,11 +297,11 @@ class GDALGeoPackageDataset final : public OGRSQLiteBaseDataSource,
 
     char **GetFileList(void) override;
 
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
     char **GetMetadataDomainList() override;
-    CPLErr SetMetadata(char **papszMetadata,
+    CPLErr SetMetadata(CSLConstList papszMetadata,
                        const char *pszDomain = "") override;
     CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
                            const char *pszDomain = "") override;
@@ -377,7 +377,7 @@ class GDALGeoPackageDataset final : public OGRSQLiteBaseDataSource,
     static constexpr int FIRST_CUSTOM_SRSID = 100000;
 
     int GetSrsId(const OGRSpatialReference *poSRS);
-    const char *GetSrsName(const OGRSpatialReference &oSRS);
+    static const char *GetSrsName(const OGRSpatialReference &oSRS);
     std::unique_ptr<OGRSpatialReference, OGRSpatialReferenceReleaser>
     GetSpatialRef(int iSrsId, bool bFallbackToEPSG = false,
                   bool bEmitErrorIfNotFound = true);
@@ -547,10 +547,10 @@ class GDALGeoPackageRasterBand final : public GDALGPKGMBTilesLikeRasterBand
 
     CPLErr SetNoDataValue(double dfNoDataValue) override;
 
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
-    CPLErr SetMetadata(char **papszMetadata,
+    CPLErr SetMetadata(CSLConstList papszMetadata,
                        const char *pszDomain = "") override;
     CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
                            const char *pszDomain = "") override;
@@ -941,12 +941,12 @@ class OGRGeoPackageTableLayer final : public OGRGeoPackageLayer
                                                   const char *pszGeomColName);
     CPLString ReturnSQLDropSpatialIndexTriggers();
 
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
     char **GetMetadataDomainList() override;
 
-    CPLErr SetMetadata(char **papszMetadata,
+    CPLErr SetMetadata(CSLConstList papszMetadata,
                        const char *pszDomain = "") override;
     CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
                            const char *pszDomain = "") override;
@@ -1017,7 +1017,7 @@ class OGRGeoPackageTableLayer final : public OGRGeoPackageLayer
     OGRErr SaveExtent();
     OGRErr SaveTimestamp();
     OGRErr BuildColumns();
-    bool IsGeomFieldSet(OGRFeature *poFeature);
+    static bool IsGeomFieldSet(OGRFeature *poFeature);
     std::string FeatureGenerateUpdateSQL(const OGRFeature *poFeature) const;
     std::string FeatureGenerateUpdateSQL(
         const OGRFeature *poFeature, int nUpdatedFieldsCount,

@@ -218,10 +218,12 @@ Vector commands
    gdal_vector_segmentize
    gdal_vector_set_field_type
    gdal_vector_set_geom_type
+   gdal_vector_sort
    gdal_vector_simplify
    gdal_vector_simplify_coverage
    gdal_vector_sql
    gdal_vector_swap_xy
+   gdal_vector_update
 
 .. only:: html
 
@@ -254,8 +256,10 @@ Vector commands
     - :ref:`gdal_vector_set_geom_type`: Modify the geometry type of a vector dataset
     - :ref:`gdal_vector_simplify`: Simplify geometries of a vector dataset
     - :ref:`gdal_vector_simplify_coverage`: Simplify shared boundaries of a polygonal vector dataset
+    - :ref:`gdal_vector_sort`: Spatially sort a vector dataset
     - :ref:`gdal_vector_sql`: Apply SQL statement(s) to a dataset
     - :ref:`gdal_vector_swap_xy`: Swap X and Y coordinates of geometries of a vector dataset
+    - :ref:`gdal_vector_update`: Update an existing vector dataset with an input vector dataset
 
     Pipelines:
 
@@ -289,6 +293,7 @@ Dataset management commands
 
    gdal_dataset
    gdal_dataset_identify
+   gdal_dataset_check
    gdal_dataset_copy
    gdal_dataset_rename
    gdal_dataset_delete
@@ -297,6 +302,7 @@ Dataset management commands
 
     - :ref:`gdal_dataset`: Entry point for dataset management commands
     - :ref:`gdal_dataset_identify`: Identify driver opening dataset(s)
+    - :ref:`gdal_dataset_check`: Check whether there are errors when reading the content of a dataset.
     - :ref:`gdal_dataset_copy`: Copy files of a dataset.
     - :ref:`gdal_dataset_rename`: Rename files of a dataset.
     - :ref:`gdal_dataset_delete`: Delete dataset(s)
@@ -336,6 +342,7 @@ Driver specific commands
    gdal_driver_gpkg_repack
    gdal_driver_gti_create
    gdal_driver_openfilegdb_repack
+   gdal_driver_parquet_create_metadata_file
    gdal_driver_pdf_list_layers
 
 .. only:: html
@@ -343,6 +350,7 @@ Driver specific commands
     - :ref:`gdal_driver_gpkg_repack`: Repack/vacuum in-place a GeoPackage dataset
     - :ref:`gdal_driver_gti_create`: Create an index of raster datasets compatible of the GDAL Tile Index (GTI) driver
     - :ref:`gdal_driver_openfilegdb_repack`: Repack in-place a FileGeodabase dataset
+    - :ref:`gdal_driver_parquet_create_metadata_file`:  Create the _metadata file for a partitioned Parquet dataset
     - :ref:`gdal_driver_pdf_list_layers`: Return the list of layers of a PDF file.
 
 

@@ -67,6 +67,9 @@ constexpr const char *GAAMDI_ALLOWED_FORMATS = "allowed_formats";
 /** Argument metadata item that applies to "output-format" argument */
 constexpr const char *GAAMDI_EXCLUDED_FORMATS = "excluded_formats";
 
+/** Argument metadata item that applies to "output-format" argument */
+constexpr const char *GAAMDI_EXTRA_FORMATS = "extra_formats";
+
 /** Name of the argument for an input dataset. */
 constexpr const char *GDAL_ARG_NAME_INPUT = "input";
 
@@ -513,7 +516,7 @@ class CPL_DLL GDALAlgorithmArgDecl final
         return *this;
     }
 
-    /** Declares whether, for list type of arguments, several values, space
+    /** Declares whether, for list type of arguments, several values, comma
      * separated, may be specified. That is "--foo=bar,baz".
      * The default is true.
      */
@@ -2836,8 +2839,7 @@ class CPL_DLL GDALAlgorithmRegistry
 
     /** Register an auto complete function for a layer name argument */
     static void SetAutoCompleteFunctionForLayerName(
-        GDALInConstructionAlgorithmArg &layerArg,
-        GDALInConstructionAlgorithmArg &datasetArg);
+        GDALInConstructionAlgorithmArg &layerArg, GDALAlgorithmArg &datasetArg);
 
     /** Register an auto complete function for a field name argument */
     static void SetAutoCompleteFunctionForFieldName(
@@ -3167,17 +3169,6 @@ class CPL_DLL GDALGlobalAlgorithmRegistry final : public GDALAlgorithmRegistry
 
     const Node *GetNodeFromPath(const std::vector<std::string> &path) const;
 };
-
-/************************************************************************/
-/*                  GDAL_STATIC_REGISTER_ALG()                          */
-/************************************************************************/
-
-/** Static registration of an algorithm by its class name (which must implement
- * GDALAlgorithm)
- */
-#define GDAL_STATIC_REGISTER_ALG(MyAlgorithm)                                  \
-    static bool MyAlgorithm##_static_registration =                            \
-        GDALGlobalAlgorithmRegistry::GetSingleton().Register<MyAlgorithm>()
 
 #endif  // #if defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS) && (defined(DOXYGEN_SKIP) || __cplusplus >= 201703L || _MSC_VER >= 1920)
 

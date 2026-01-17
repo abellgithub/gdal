@@ -168,7 +168,7 @@ class OGRParquetLayer final : public OGRParquetLayerBase
     OGRErr SetIgnoredFields(CSLConstList papszFields) override;
     const char *GetMetadataItem(const char *pszName,
                                 const char *pszDomain = "") override;
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
     OGRErr SetNextByIndex(GIntBig nIndex) override;
 
     bool GetArrowStream(struct ArrowArrayStream *out_stream,
@@ -306,7 +306,7 @@ class OGRParquetDataset final : public OGRArrowDataset
     explicit OGRParquetDataset();
     ~OGRParquetDataset() override;
 
-    CPLErr Close() override;
+    CPLErr Close(GDALProgressFunc = nullptr, void * = nullptr) override;
 
     OGRLayer *ExecuteSQL(const char *pszSQLCommand,
                          OGRGeometry *poSpatialFilter,
@@ -352,8 +352,6 @@ class OGRParquetWriterLayer final : public OGRArrowWriterLayer
     //! Whether to write "geo" footer metadata;
     bool m_bWriteGeoMetadata = true;
 
-    CPLStringList m_aosCreationOptions{};
-
     bool IsFileWriterCreated() const override
     {
         return m_poFileWriter != nullptr;
@@ -395,7 +393,8 @@ class OGRParquetWriterLayer final : public OGRArrowWriterLayer
         const std::shared_ptr<arrow::io::OutputStream> &poOutputStream,
         const char *pszLayerName);
 
-    CPLErr SetMetadata(char **papszMetadata, const char *pszDomain) override;
+    CPLErr SetMetadata(CSLConstList papszMetadata,
+                       const char *pszDomain) override;
 
     bool SetOptions(const OGRGeomFieldDefn *poSrcGeomFieldDefn,
                     CSLConstList papszOptions);
@@ -469,7 +468,7 @@ class OGRParquetWriterDataset final : public GDALPamDataset
         return m_poMemoryPool.get();
     }
 
-    CPLErr Close() override;
+    CPLErr Close(GDALProgressFunc = nullptr, void * = nullptr) override;
 
     int GetLayerCount() const override;
     const OGRLayer *GetLayer(int idx) const override;

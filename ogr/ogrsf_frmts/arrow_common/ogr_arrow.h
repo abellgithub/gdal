@@ -141,6 +141,7 @@ class OGRArrowLayer CPL_NON_FINAL
 
   protected:
     OGRArrowDataset *m_poArrowDS = nullptr;
+    const bool m_bListsAsStringJson;
     arrow::MemoryPool *m_poMemoryPool = nullptr;
     OGRFeatureDefn *m_poFeatureDefn = nullptr;
     std::shared_ptr<arrow::Schema> m_poSchema{};
@@ -228,7 +229,8 @@ class OGRArrowLayer CPL_NON_FINAL
 
     void LoadGDALMetadata(const arrow::KeyValueMetadata *kv_metadata);
 
-    OGRArrowLayer(OGRArrowDataset *poDS, const char *pszLayerName);
+    OGRArrowLayer(OGRArrowDataset *poDS, const char *pszLayerName,
+                  bool bListsAsStringJson);
 
     virtual std::string GetDriverUCName() const = 0;
     static bool IsIntegerArrowType(arrow::Type::type typeId);
@@ -374,7 +376,7 @@ class OGRArrowDataset CPL_NON_FINAL : public GDALPamDataset
         OGRArrowDataset::Close();
     }
 
-    CPLErr Close() override
+    CPLErr Close(GDALProgressFunc = nullptr, void * = nullptr) override
     {
         m_poLayer.reset();
         m_poMemoryPool.reset();
@@ -438,6 +440,10 @@ class OGRArrowWriterLayer CPL_NON_FINAL : public OGRLayer
     // of the geometries. Used by Parquet.
     bool m_bWriteBBoxStruct = false;
 
+    //! Name of the struct field for the bounding box. Only used if m_bWriteBBoxStruct
+    // is set. If not set, it defaults to {geometry_column_name}_bbox
+    std::string m_oBBoxStructFieldName{};
+
     //! Schema fields for bounding box of geometry columns.
     // Constraint: if not empty, m_apoFieldsBBOX.size() == m_poFeatureDefn->GetGeomFieldCount()
     std::vector<std::shared_ptr<arrow::Field>> m_apoFieldsBBOX{};
@@ -473,6 +479,8 @@ class OGRArrowWriterLayer CPL_NON_FINAL : public OGRLayer
 #if ARROW_VERSION_MAJOR >= 21
     bool m_bUseArrowWKBExtension = false;
 #endif
+
+    CPLStringList m_aosCreationOptions{};
 
     static OGRArrowGeomEncoding
     GetPreciseArrowGeomEncoding(OGRArrowGeomEncoding eEncodingType,

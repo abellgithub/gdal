@@ -939,7 +939,7 @@ CPLErr HDF4ImageDataset::FlushCache(bool bAtClosing)
     // Store all metadata from source dataset as HDF attributes
     if (GetMetadata())
     {
-        char **papszMeta = GetMetadata();
+        CSLConstList papszMeta = GetMetadata();
 
         while (*papszMeta)
         {
@@ -3854,7 +3854,7 @@ GDALDataset *HDF4ImageDataset::Create(const char *pszFilename, int nXSize,
                 return DFNT_INT32;
             case GDT_Int16:
                 return DFNT_INT16;
-            case GDT_Byte:
+            case GDT_UInt8:
                 return DFNT_UINT8;
             case GDT_Int8:
                 return DFNT_INT8;

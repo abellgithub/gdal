@@ -86,11 +86,13 @@ extensions = [
     "doctestplus_gdal",
     "source_file",
     "sphinx.ext.napoleon",
+    "sphinxcontrib.cairosvgconverter",
     "sphinxcontrib.jquery",
     "sphinxcontrib_programoutput_gdal",
     "sphinxcontrib.spelling",
     "myst_nb",
     "sphinx_tabs.tabs",
+    "sphinx_toolbox.collapse",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -156,6 +158,7 @@ nitpick_ignore = [
     ("cpp:identifier", "tm"),
     ("cpp:identifier", "TRUE"),
     ("cpp:identifier", "uint8_t"),
+    ("cpp:identifier", "uint32_t"),
     ("cpp:identifier", "uint64_t"),
     ("cpp:identifier", "va_list"),
     # ODBC specific
@@ -439,6 +442,13 @@ man_pages = [
         "programs/gdal_dataset_identify",
         "gdal-dataset-identify",
         "Identify driver opening dataset(s)",
+        [author_evenr],
+        1,
+    ),
+    (
+        "programs/gdal_dataset_check",
+        "gdal-dataset-check",
+        "Check whether there are errors when reading the content of a dataset",
         [author_evenr],
         1,
     ),
@@ -933,6 +943,13 @@ man_pages = [
         1,
     ),
     (
+        "programs/gdal_vector_sort",
+        "gdal-vector-sort",
+        "Spatially sort a vector dataset",
+        [author_dbaston],
+        1,
+    ),
+    (
         "programs/gdal_vector_buffer",
         "gdal-vector-buffer",
         "Compute a buffer around geometries of a vector dataset",
@@ -942,7 +959,7 @@ man_pages = [
     (
         "programs/gdal_vector_swap_xy",
         "gdal-vector-swap-xy",
-        "Swap X and Y coordinates of geometries of a vector datasett",
+        "Swap X and Y coordinates of geometries of a vector dataset",
         [author_evenr],
         1,
     ),
@@ -1013,6 +1030,13 @@ man_pages = [
         "programs/gdal_vector_sql",
         "gdal-vector-sql",
         "Apply SQL statement(s) to a dataset",
+        [author_evenr],
+        1,
+    ),
+    (
+        "programs/gdal_vector_update",
+        "gdal-vector-update",
+        "Update an existing vector dataset with an input vector dataset",
         [author_evenr],
         1,
     ),

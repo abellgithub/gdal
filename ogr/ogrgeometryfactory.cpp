@@ -13,6 +13,7 @@
  ****************************************************************************/
 
 #include "cpl_port.h"
+#include "cpl_quad_tree.h"
 
 #include "cpl_conv.h"
 #include "cpl_error.h"
@@ -1532,23 +1533,46 @@ struct sPolyExtended
     sPolyExtended(sPolyExtended &&) = default;
     sPolyExtended &operator=(sPolyExtended &&) = default;
 
-    OGRGeometry *poGeometry = nullptr;
-    OGRCurvePolygon *poPolygon = nullptr;
+    std::unique_ptr<OGRCurvePolygon> poPolygon{};
     OGREnvelope sEnvelope{};
-    OGRCurve *poExteriorRing = nullptr;
-    OGRPoint poAPoint{};
-    int nInitialIndex = 0;
+    OGRPoint sPoint{};
+    size_t nInitialIndex = 0;
     OGRCurvePolygon *poEnclosingPolygon = nullptr;
     double dfArea = 0.0;
     bool bIsTopLevel = false;
     bool bIsCW = false;
     bool bIsPolygon = false;
+
+    inline const OGRLinearRing *getExteriorLinearRing() const
+    {
+        return poPolygon->getExteriorRingCurve()->toLinearRing();
+    }
+
+    static void GetBoundsFromPolyEx(const void *hFeature, CPLRectObj *pBounds)
+    {
+        const auto *poPolyEx = static_cast<const sPolyExtended *>(hFeature);
+        pBounds->minx = poPolyEx->sEnvelope.MinX;
+        pBounds->miny = poPolyEx->sEnvelope.MinY;
+        pBounds->maxx = poPolyEx->sEnvelope.MaxX;
+        pBounds->maxy = poPolyEx->sEnvelope.MaxY;
+    }
+
+    // recent libc++ std::sort() involve unsigned integer overflow in some
+    // situation
+    CPL_NOSANITIZE_UNSIGNED_INT_OVERFLOW
+    static void SortByIncreasingEra(const sPolyExtended **pStart,
+                                    const sPolyExtended **pEnd)
+    {
+        std::sort(pStart, pEnd,
+                  [](const sPolyExtended *psPoly1, const sPolyExtended *psPoly2)
+                  { return psPoly1->dfArea < psPoly2->dfArea; });
+    }
 };
 
-static bool OGRGeometryFactoryCompareArea(const sPolyExtended &sPoly1,
-                                          const sPolyExtended &sPoly2)
+static bool OGRGeometryFactoryCompareAreaDescending(const sPolyExtended &sPoly1,
+                                                    const sPolyExtended &sPoly2)
 {
-    return sPoly2.dfArea < sPoly1.dfArea;
+    return sPoly1.dfArea > sPoly2.dfArea;
 }
 
 static bool OGRGeometryFactoryCompareByIndex(const sPolyExtended &sPoly1,
@@ -1620,32 +1644,103 @@ enum OrganizePolygonMethod
  * @return a single resulting geometry (either OGRPolygon, OGRCurvePolygon,
  * OGRMultiPolygon, OGRMultiSurface or OGRGeometryCollection). Returns a
  * POLYGON EMPTY in the case of nPolygonCount being 0.
+ *
+ * @deprecated since 3.13. Use variant
+ * that accepts a std::vector&lt;std::unique_ptr&lt;OGRGeometry&gt;&gt;&amp; instead.
  */
 
 OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
                                                   int nPolygonCount,
                                                   int *pbIsValidGeometry,
-                                                  const char **papszOptions)
+                                                  CSLConstList papszOptions)
 {
-    if (nPolygonCount == 0)
+    std::vector<std::unique_ptr<OGRGeometry>> apoPolygons(
+        papoPolygons, papoPolygons + nPolygonCount);
+    bool bIsValidGeometry = false;
+    auto poGeometry = OGRGeometryFactory::organizePolygons(
+        apoPolygons, &bIsValidGeometry, papszOptions);
+    if (pbIsValidGeometry)
+        *pbIsValidGeometry = bIsValidGeometry;
+    return poGeometry.release();
+}
+
+/**
+ * \brief Organize polygons based on geometries.
+ *
+ * Analyse a set of rings (passed as simple polygons), and based on a
+ * geometric analysis convert them into a polygon with inner rings,
+ * (or a MultiPolygon if dealing with more than one polygon) that follow the
+ * OGC Simple Feature specification.
+ *
+ * All the input geometries must be OGRPolygon/OGRCurvePolygon with only a valid
+ * exterior ring (at least 4 points) and no interior rings.
+ *
+ * The passed in geometries become the responsibility of the method.
+ *
+ * For faster computation, a polygon is considered to be inside
+ * another one if a single point of its external ring is included into the other
+ * one. (unless 'OGR_DEBUG_ORGANIZE_POLYGONS' configuration option is set to
+ * TRUE. In that case, a slower algorithm that tests exact topological
+ * relationships is used if GEOS is available.)
+ *
+ * In cases where a big number of polygons is passed to this function, the
+ * default processing may be really slow. You can skip the processing by adding
+ * METHOD=SKIP to the option list (the result of the function will be a
+ * multi-polygon with all polygons as toplevel polygons) or only make it analyze
+ * counterclockwise polygons by adding METHOD=ONLY_CCW to the option list if you
+ * can assume that the outline of holes is counterclockwise defined (this is the
+ * convention for example in shapefiles, Personal Geodatabases or File
+ * Geodatabases).
+ *
+ * For FileGDB, in most cases, but not always, a faster method than ONLY_CCW can
+ * be used. It is CCW_INNER_JUST_AFTER_CW_OUTER. When using it, inner rings are
+ * assumed to be counterclockwise oriented, and following immediately the outer
+ * ring (clockwise oriented) that they belong to. If that assumption is not met,
+ * an inner ring could be attached to the wrong outer ring, so this method must
+ * be used with care.
+ *
+ * If the OGR_ORGANIZE_POLYGONS configuration option is defined, its value will
+ * override the value of the METHOD option of papszOptions (useful to modify the
+ * behavior of the shapefile driver)
+ *
+ * @param apoPolygons array of geometries - should all be OGRPolygons
+ * or OGRCurvePolygons. Ownership of the geometries is passed.
+ * @param pbIsValidGeometry value may be set to FALSE if an invalid result is
+ * detected. Validity checks vary according to the method used and are are limited
+ * to what is needed to link inner rings to outer rings, so a result of TRUE
+ * does not mean that OGRGeometry::IsValid() returns TRUE.
+ * @param papszOptions a list of strings for passing options
+ *
+ * @return a single resulting geometry (either OGRPolygon, OGRCurvePolygon,
+ * OGRMultiPolygon, OGRMultiSurface or OGRGeometryCollection). Returns a
+ * POLYGON EMPTY in the case of nPolygonCount being 0.
+ *
+ * @since 3.13
+ */
+
+std::unique_ptr<OGRGeometry> OGRGeometryFactory::organizePolygons(
+    std::vector<std::unique_ptr<OGRGeometry>> &apoPolygons,
+    bool *pbIsValidGeometry, CSLConstList papszOptions)
+{
+    if (apoPolygons.empty())
     {
         if (pbIsValidGeometry)
-            *pbIsValidGeometry = TRUE;
+            *pbIsValidGeometry = true;
 
-        return new OGRPolygon();
+        return std::make_unique<OGRPolygon>();
     }
 
-    OGRGeometry *geom = nullptr;
+    std::unique_ptr<OGRGeometry> geom;
     OrganizePolygonMethod method = METHOD_NORMAL;
     bool bHasCurves = false;
 
     /* -------------------------------------------------------------------- */
     /*      Trivial case of a single polygon.                               */
     /* -------------------------------------------------------------------- */
-    if (nPolygonCount == 1)
+    if (apoPolygons.size() == 1)
     {
         OGRwkbGeometryType eType =
-            wkbFlatten(papoPolygons[0]->getGeometryType());
+            wkbFlatten(apoPolygons[0]->getGeometryType());
 
         bool bIsValid = true;
 
@@ -1654,15 +1749,13 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
             CPLError(CE_Warning, CPLE_AppDefined,
                      "organizePolygons() received a non-Polygon geometry.");
             bIsValid = false;
-            delete papoPolygons[0];
-            geom = new OGRPolygon();
+            apoPolygons[0].reset();
+            geom = std::make_unique<OGRPolygon>();
         }
         else
         {
-            geom = papoPolygons[0];
+            geom = std::move(apoPolygons[0]);
         }
-
-        papoPolygons[0] = nullptr;
 
         if (pbIsValidGeometry)
             *pbIsValidGeometry = bIsValid;
@@ -1676,27 +1769,24 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
         /* ------------------------------------------------------------------ */
         /*      A wee bit of a warning.                                       */
         /* ------------------------------------------------------------------ */
-        static int firstTime = 1;
+        bUseFastVersion = !haveGEOS();
         // cppcheck-suppress knownConditionTrueFalse
-        if (!haveGEOS() && firstTime)
+        if (bUseFastVersion)
         {
-            CPLDebug(
+            CPLDebugOnce(
                 "OGR",
                 "In OGR_DEBUG_ORGANIZE_POLYGONS mode, GDAL should be built "
                 "with GEOS support enabled in order "
                 "OGRGeometryFactory::organizePolygons to provide reliable "
                 "results on complex polygons.");
-            firstTime = 0;
         }
-        // cppcheck-suppress knownConditionTrueFalse
-        bUseFastVersion = !haveGEOS();
     }
 
     /* -------------------------------------------------------------------- */
     /*      Setup per polygon envelope and area information.                */
     /* -------------------------------------------------------------------- */
     std::vector<sPolyExtended> asPolyEx;
-    asPolyEx.reserve(nPolygonCount);
+    asPolyEx.reserve(apoPolygons.size());
 
     bool bValidTopology = true;
     bool bMixedUpGeometries = false;
@@ -1731,30 +1821,32 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
         }
     }
 
-    int nCountCWPolygon = 0;
-    int indexOfCWPolygon = -1;
+    size_t nCountCWPolygon = 0;
+    constexpr size_t INVALID_INDEX = static_cast<size_t>(-1);
+    size_t indexOfCWPolygon = INVALID_INDEX;
+    OGREnvelope sGlobalEnvelope;
 
-    for (int i = 0; i < nPolygonCount; i++)
+    for (size_t i = 0; i < apoPolygons.size(); ++i)
     {
-        OGRwkbGeometryType eType =
-            wkbFlatten(papoPolygons[i]->getGeometryType());
+        const OGRwkbGeometryType eType =
+            wkbFlatten(apoPolygons[i]->getGeometryType());
 
         if (eType != wkbPolygon && eType != wkbCurvePolygon)
         {
             // Ignore any points or lines that find their way in here.
             CPLError(CE_Warning, CPLE_AppDefined,
                      "organizePolygons() received a non-Polygon geometry.");
-            delete papoPolygons[i];
+            apoPolygons[i].reset();
             continue;
         }
 
         sPolyExtended sPolyEx;
 
         sPolyEx.nInitialIndex = i;
-        sPolyEx.poGeometry = papoPolygons[i];
-        sPolyEx.poPolygon = papoPolygons[i]->toCurvePolygon();
+        sPolyEx.poPolygon.reset(apoPolygons[i].release()->toCurvePolygon());
 
-        papoPolygons[i]->getEnvelope(&sPolyEx.sEnvelope);
+        sPolyEx.poPolygon->getEnvelope(&sPolyEx.sEnvelope);
+        sGlobalEnvelope.Merge(sPolyEx.sEnvelope);
 
         if (eType == wkbCurvePolygon)
             bHasCurves = true;
@@ -1764,17 +1856,17 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
         {
             if (method != METHOD_CCW_INNER_JUST_AFTER_CW_OUTER)
                 sPolyEx.dfArea = sPolyEx.poPolygon->get_Area();
-            sPolyEx.poExteriorRing = sPolyEx.poPolygon->getExteriorRingCurve();
-            sPolyEx.poExteriorRing->StartPoint(&sPolyEx.poAPoint);
+            auto *poExteriorRing = sPolyEx.poPolygon->getExteriorRingCurve();
+            poExteriorRing->StartPoint(&sPolyEx.sPoint);
             if (eType == wkbPolygon)
             {
-                sPolyEx.bIsCW = CPL_TO_BOOL(
-                    sPolyEx.poExteriorRing->toLinearRing()->isClockwise());
+                sPolyEx.bIsCW =
+                    CPL_TO_BOOL(poExteriorRing->toLinearRing()->isClockwise());
                 sPolyEx.bIsPolygon = true;
             }
             else
             {
-                OGRLineString *poLS = sPolyEx.poExteriorRing->CurveToLine();
+                OGRLineString *poLS = poExteriorRing->CurveToLine();
                 OGRLinearRing oLR;
                 oLR.addSubLineString(poLS);
                 sPolyEx.bIsCW = CPL_TO_BOOL(oLR.isClockwise());
@@ -1812,14 +1904,14 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
          method == METHOD_CCW_INNER_JUST_AFTER_CW_OUTER) &&
         nCountCWPolygon == 1 && bUseFastVersion)
     {
-        OGRCurvePolygon *poCP = asPolyEx[indexOfCWPolygon].poPolygon;
-        for (int i = 0; i < static_cast<int>(asPolyEx.size()); i++)
+        assert(indexOfCWPolygon != INVALID_INDEX);
+        auto poCP = std::move(asPolyEx[indexOfCWPolygon].poPolygon);
+        for (size_t i = 0; i < asPolyEx.size(); i++)
         {
             if (i != indexOfCWPolygon)
             {
                 poCP->addRingDirectly(
                     asPolyEx[i].poPolygon->stealExteriorRingCurve());
-                delete asPolyEx[i].poPolygon;
             }
         }
 
@@ -1832,49 +1924,63 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
     {
         // Inner rings are CCW oriented and follow immediately the outer
         // ring (that is CW oriented) in which they are included.
-        OGRMultiSurface *poMulti = nullptr;
-        OGRCurvePolygon *poCur = asPolyEx[0].poPolygon;
-        OGRGeometry *poRet = poCur;
+        std::unique_ptr<OGRMultiSurface> poMulti;
+        auto poCurvePoly = std::move(asPolyEx[0].poPolygon);
+
         // We have already checked that the first ring is CW.
-        OGREnvelope *psEnvelope = &(asPolyEx[0].sEnvelope);
+        const OGREnvelope *psEnvelope = &(asPolyEx[0].sEnvelope);
         for (std::size_t i = 1; i < asPolyEx.size(); i++)
         {
             if (asPolyEx[i].bIsCW)
             {
-                if (poMulti == nullptr)
+                if (!poMulti)
                 {
                     if (bHasCurves)
-                        poMulti = new OGRMultiSurface();
+                        poMulti = std::make_unique<OGRMultiSurface>();
                     else
-                        poMulti = new OGRMultiPolygon();
-                    poRet = poMulti;
-                    poMulti->addGeometryDirectly(poCur);
+                        poMulti = std::make_unique<OGRMultiPolygon>();
+                    poMulti->addGeometry(std::move(poCurvePoly));
                 }
-                poCur = asPolyEx[i].poPolygon;
-                poMulti->addGeometryDirectly(poCur);
+                poMulti->addGeometry(std::move(asPolyEx[i].poPolygon));
                 psEnvelope = &(asPolyEx[i].sEnvelope);
             }
             else
             {
-                poCur->addRingDirectly(
+                auto poExteriorRing = std::unique_ptr<OGRCurve>(
                     asPolyEx[i].poPolygon->stealExteriorRingCurve());
-                if (!(asPolyEx[i].poAPoint.getX() >= psEnvelope->MinX &&
-                      asPolyEx[i].poAPoint.getX() <= psEnvelope->MaxX &&
-                      asPolyEx[i].poAPoint.getY() >= psEnvelope->MinY &&
-                      asPolyEx[i].poAPoint.getY() <= psEnvelope->MaxY))
+                if (poCurvePoly)
+                {
+                    poCurvePoly->addRing(std::move(poExteriorRing));
+                }
+                else
+                {
+                    poMulti->getGeometryRef(poMulti->getNumGeometries() - 1)
+                        ->toCurvePolygon()
+                        ->addRing(std::move(poExteriorRing));
+                }
+                if (!(asPolyEx[i].sPoint.getX() >= psEnvelope->MinX &&
+                      asPolyEx[i].sPoint.getX() <= psEnvelope->MaxX &&
+                      asPolyEx[i].sPoint.getY() >= psEnvelope->MinY &&
+                      asPolyEx[i].sPoint.getY() <= psEnvelope->MaxY))
                 {
                     CPLError(CE_Warning, CPLE_AppDefined,
                              "Part %d does not respect "
                              "CCW_INNER_JUST_AFTER_CW_OUTER rule",
                              static_cast<int>(i));
                 }
-                delete asPolyEx[i].poPolygon;
             }
         }
 
         if (pbIsValidGeometry)
-            *pbIsValidGeometry = TRUE;
-        return poRet;
+            *pbIsValidGeometry = true;
+        // cppcheck-suppress accessMoved
+        if (poCurvePoly)
+        {
+            // cppcheck-suppress accessMoved
+            return poCurvePoly;
+        }
+        else
+            return poMulti;
     }
     else if (method == METHOD_CCW_INNER_JUST_AFTER_CW_OUTER)
     {
@@ -1886,34 +1992,29 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
     // Emits a warning if the number of parts is sufficiently big to anticipate
     // for very long computation time, and the user didn't specify an explicit
     // method.
-    if (nPolygonCount > N_CRITICAL_PART_NUMBER && method == METHOD_NORMAL &&
-        pszMethodValue == nullptr)
+    if (apoPolygons.size() > N_CRITICAL_PART_NUMBER &&
+        method == METHOD_NORMAL && pszMethodValue == nullptr)
     {
-        static int firstTime = 1;
-        if (firstTime)
+        if (bFoundCCW)
         {
-            if (bFoundCCW)
-            {
-                CPLError(
-                    CE_Warning, CPLE_AppDefined,
-                    "organizePolygons() received a polygon with more than %d "
-                    "parts. The processing may be really slow.  "
-                    "You can skip the processing by setting METHOD=SKIP, "
-                    "or only make it analyze counter-clock wise parts by "
-                    "setting METHOD=ONLY_CCW if you can assume that the "
-                    "outline of holes is counter-clock wise defined",
-                    N_CRITICAL_PART_NUMBER);
-            }
-            else
-            {
-                CPLError(
-                    CE_Warning, CPLE_AppDefined,
-                    "organizePolygons() received a polygon with more than %d "
-                    "parts.  The processing may be really slow.  "
-                    "You can skip the processing by setting METHOD=SKIP.",
-                    N_CRITICAL_PART_NUMBER);
-            }
-            firstTime = 0;
+            CPLErrorOnce(
+                CE_Warning, CPLE_AppDefined,
+                "organizePolygons() received a polygon with more than %d "
+                "parts. The processing may be really slow.  "
+                "You can skip the processing by setting METHOD=SKIP, "
+                "or only make it analyze counter-clock wise parts by "
+                "setting METHOD=ONLY_CCW if you can assume that the "
+                "outline of holes is counter-clock wise defined",
+                N_CRITICAL_PART_NUMBER);
+        }
+        else
+        {
+            CPLErrorOnce(
+                CE_Warning, CPLE_AppDefined,
+                "organizePolygons() received a polygon with more than %d "
+                "parts.  The processing may be really slow.  "
+                "You can skip the processing by setting METHOD=SKIP.",
+                N_CRITICAL_PART_NUMBER);
         }
     }
 
@@ -1952,9 +2053,32 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
     {
         // STEP 1: Sort polygons by descending area.
         std::sort(asPolyEx.begin(), asPolyEx.end(),
-                  OGRGeometryFactoryCompareArea);
+                  OGRGeometryFactoryCompareAreaDescending);
     }
-    papoPolygons = nullptr;  // Just to use to avoid it afterwards.
+
+    /* -------------------------------------------------------------------- */
+    /*      Build a quadtree of polygons that can be exterior rings.        */
+    /* -------------------------------------------------------------------- */
+
+    CPLRectObj sRect;
+    sRect.minx = sGlobalEnvelope.MinX;
+    sRect.miny = sGlobalEnvelope.MinY;
+    sRect.maxx = sGlobalEnvelope.MaxX;
+    sRect.maxy = sGlobalEnvelope.MaxY;
+    std::unique_ptr<CPLQuadTree, decltype(&CPLQuadTreeDestroy)> poQuadTree(
+        CPLQuadTreeCreate(&sRect, sPolyExtended::GetBoundsFromPolyEx),
+        CPLQuadTreeDestroy);
+    for (auto &sPolyEx : asPolyEx)
+    {
+        if (method == METHOD_ONLY_CCW && sPolyEx.bIsCW == false)
+        {
+            // In that mode, we are interested only in indexing clock-wise
+            // polygons, which are the exterior rings
+            continue;
+        }
+
+        CPLQuadTreeInsert(poQuadTree.get(), &sPolyEx);
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Compute relationships, if things seem well structured.          */
@@ -1964,98 +2088,123 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
     asPolyEx[0].bIsTopLevel = true;
     asPolyEx[0].poEnclosingPolygon = nullptr;
 
-    int nCountTopLevel = 1;
+    size_t nCountTopLevel = 1;
 
     // STEP 2.
-    for (int i = 1; !bMixedUpGeometries && bValidTopology &&
-                    i < static_cast<int>(asPolyEx.size());
-         i++)
+    for (size_t i = 1;
+         !bMixedUpGeometries && bValidTopology && i < asPolyEx.size(); i++)
     {
-        if (method == METHOD_ONLY_CCW && asPolyEx[i].bIsCW)
+        auto &thisPoly = asPolyEx[i];
+
+        if (method == METHOD_ONLY_CCW && thisPoly.bIsCW)
         {
             nCountTopLevel++;
-            asPolyEx[i].bIsTopLevel = true;
-            asPolyEx[i].poEnclosingPolygon = nullptr;
+            thisPoly.bIsTopLevel = true;
+            thisPoly.poEnclosingPolygon = nullptr;
             continue;
         }
 
-        int j = i - 1;  // Used after for.
-        for (; bValidTopology && j >= 0; j--)
-        {
-            bool b_i_inside_j = false;
+        // Look for candidate rings that intersect the current ring
+        CPLRectObj aoi;
+        aoi.minx = thisPoly.sEnvelope.MinX;
+        aoi.miny = thisPoly.sEnvelope.MinY;
+        aoi.maxx = thisPoly.sEnvelope.MaxX;
+        aoi.maxy = thisPoly.sEnvelope.MaxY;
+        int nCandidates = 0;
+        std::unique_ptr<const sPolyExtended *, decltype(&CPLFree)>
+            aphCandidateShells(
+                const_cast<const sPolyExtended **>(
+                    reinterpret_cast<sPolyExtended **>(CPLQuadTreeSearch(
+                        poQuadTree.get(), &aoi, &nCandidates))),
+                CPLFree);
 
-            if (method == METHOD_ONLY_CCW && asPolyEx[j].bIsCW == false)
+        // Sort candidate outer rings by increasing area
+        sPolyExtended::SortByIncreasingEra(
+            aphCandidateShells.get(), aphCandidateShells.get() + nCandidates);
+
+        int j = 0;
+        for (; bValidTopology && j < nCandidates; j++)
+        {
+            const auto &otherPoly = *(aphCandidateShells.get()[j]);
+
+            if (method == METHOD_ONLY_CCW && otherPoly.bIsCW == false)
             {
-                // In that mode, i which is CCW if we reach here can only be
+                // In that mode, this which is CCW if we reach here can only be
                 // included in a CW polygon.
                 continue;
             }
+            if (otherPoly.dfArea < thisPoly.dfArea || &otherPoly == &thisPoly)
+            {
+                continue;
+            }
 
-            if (asPolyEx[j].sEnvelope.Contains(asPolyEx[i].sEnvelope))
+            bool thisInsideOther = false;
+            if (otherPoly.sEnvelope.Contains(thisPoly.sEnvelope))
             {
                 if (bUseFastVersion)
                 {
-                    if (method == METHOD_ONLY_CCW && j == 0)
+                    if (method == METHOD_ONLY_CCW &&
+                        (&otherPoly) == (&asPolyEx[0]))
                     {
                         // We are testing if a CCW ring is in the biggest CW
-                        // ring It *must* be inside as this is the last
+                        // ring. It *must* be inside as this is the last
                         // candidate, otherwise the winding order rules is
                         // broken.
-                        b_i_inside_j = true;
+                        thisInsideOther = true;
                     }
-                    else if (asPolyEx[i].bIsPolygon && asPolyEx[j].bIsPolygon &&
-                             asPolyEx[j]
-                                 .poExteriorRing->toLinearRing()
-                                 ->isPointOnRingBoundary(&asPolyEx[i].poAPoint,
+                    else if (thisPoly.bIsPolygon && otherPoly.bIsPolygon &&
+                             otherPoly.getExteriorLinearRing()
+                                 ->isPointOnRingBoundary(&thisPoly.sPoint,
                                                          FALSE))
                     {
-                        OGRLinearRing *poLR_i =
-                            asPolyEx[i].poExteriorRing->toLinearRing();
-                        OGRLinearRing *poLR_j =
-                            asPolyEx[j].poExteriorRing->toLinearRing();
+                        const OGRLinearRing *poLR_this =
+                            thisPoly.getExteriorLinearRing();
+                        const OGRLinearRing *poLR_other =
+                            otherPoly.getExteriorLinearRing();
 
-                        // If the point of i is on the boundary of j, we will
-                        // iterate over the other points of i.
-                        const int nPoints = poLR_i->getNumPoints();
+                        // If the point of i is on the boundary of other, we will
+                        // iterate over the other points of this.
+                        const int nPoints = poLR_this->getNumPoints();
                         int k = 1;  // Used after for.
-                        OGRPoint previousPoint = asPolyEx[i].poAPoint;
+                        OGRPoint previousPoint = thisPoly.sPoint;
                         for (; k < nPoints; k++)
                         {
                             OGRPoint point;
-                            poLR_i->getPoint(k, &point);
+                            poLR_this->getPoint(k, &point);
                             if (point.getX() == previousPoint.getX() &&
                                 point.getY() == previousPoint.getY())
                             {
                                 continue;
                             }
-                            if (poLR_j->isPointOnRingBoundary(&point, FALSE))
+                            if (poLR_other->isPointOnRingBoundary(&point,
+                                                                  FALSE))
                             {
-                                // If it is on the boundary of j, iterate again.
+                                // If it is on the boundary of other, iterate again.
                             }
-                            else if (poLR_j->isPointInRing(&point, FALSE))
+                            else if (poLR_other->isPointInRing(&point, FALSE))
                             {
-                                // If then point is strictly included in j, then
-                                // i is considered inside j.
-                                b_i_inside_j = true;
+                                // If then point is strictly included in other, then
+                                // this is considered inside other.
+                                thisInsideOther = true;
                                 break;
                             }
                             else
                             {
-                                // If it is outside, then i cannot be inside j.
+                                // If it is outside, then this cannot be inside other.
                                 break;
                             }
                             previousPoint = std::move(point);
                         }
-                        if (!b_i_inside_j && k == nPoints && nPoints > 2)
+                        if (!thisInsideOther && k == nPoints && nPoints > 2)
                         {
-                            // All points of i are on the boundary of j.
-                            // Take a point in the middle of a segment of i and
-                            // test it against j.
-                            poLR_i->getPoint(0, &previousPoint);
+                            // All points of this are on the boundary of other.
+                            // Take a point in the middle of a segment of this and
+                            // test it against other.
+                            poLR_this->getPoint(0, &previousPoint);
                             for (k = 1; k < nPoints; k++)
                             {
                                 OGRPoint point;
-                                poLR_i->getPoint(k, &point);
+                                poLR_this->getPoint(k, &point);
                                 if (point.getX() == previousPoint.getX() &&
                                     point.getY() == previousPoint.getY())
                                 {
@@ -2066,24 +2215,24 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
                                     (point.getX() + previousPoint.getX()) / 2);
                                 pointMiddle.setY(
                                     (point.getY() + previousPoint.getY()) / 2);
-                                if (poLR_j->isPointOnRingBoundary(&pointMiddle,
-                                                                  FALSE))
+                                if (poLR_other->isPointOnRingBoundary(
+                                        &pointMiddle, FALSE))
                                 {
-                                    // If it is on the boundary of j, iterate
+                                    // If it is on the boundary of other, iterate
                                     // again.
                                 }
-                                else if (poLR_j->isPointInRing(&pointMiddle,
-                                                               FALSE))
+                                else if (poLR_other->isPointInRing(&pointMiddle,
+                                                                   FALSE))
                                 {
-                                    // If then point is strictly included in j,
-                                    // then i is considered inside j.
-                                    b_i_inside_j = true;
+                                    // If then point is strictly included in other,
+                                    // then this is considered inside other.
+                                    thisInsideOther = true;
                                     break;
                                 }
                                 else
                                 {
-                                    // If it is outside, then i cannot be inside
-                                    // j.
+                                    // If it is outside, then this cannot be inside
+                                    // other.
                                     break;
                                 }
                                 previousPoint = std::move(point);
@@ -2092,43 +2241,42 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
                     }
                     // Note that isPointInRing only test strict inclusion in the
                     // ring.
-                    else if (asPolyEx[i].bIsPolygon && asPolyEx[j].bIsPolygon &&
-                             asPolyEx[j]
-                                 .poExteriorRing->toLinearRing()
-                                 ->isPointInRing(&asPolyEx[i].poAPoint, FALSE))
+                    else if (thisPoly.bIsPolygon && otherPoly.bIsPolygon &&
+                             otherPoly.getExteriorLinearRing()->isPointInRing(
+                                 &thisPoly.sPoint, FALSE))
                     {
-                        b_i_inside_j = true;
+                        thisInsideOther = true;
                     }
                 }
-                else if (asPolyEx[j].poPolygon->Contains(asPolyEx[i].poPolygon))
+                else if (otherPoly.poPolygon->Contains(
+                             thisPoly.poPolygon.get()))
                 {
-                    b_i_inside_j = true;
+                    thisInsideOther = true;
                 }
             }
 
-            if (b_i_inside_j)
+            if (thisInsideOther)
             {
-                if (asPolyEx[j].bIsTopLevel)
+                if (otherPoly.bIsTopLevel)
                 {
                     // We are a lake.
-                    asPolyEx[i].bIsTopLevel = false;
-                    asPolyEx[i].poEnclosingPolygon = asPolyEx[j].poPolygon;
+                    thisPoly.bIsTopLevel = false;
+                    thisPoly.poEnclosingPolygon = otherPoly.poPolygon.get();
                 }
                 else
                 {
                     // We are included in a something not toplevel (a lake),
                     // so in OGCSF we are considered as toplevel too.
                     nCountTopLevel++;
-                    asPolyEx[i].bIsTopLevel = true;
-                    asPolyEx[i].poEnclosingPolygon = nullptr;
+                    thisPoly.bIsTopLevel = true;
+                    thisPoly.poEnclosingPolygon = nullptr;
                 }
                 break;
             }
             // Use Overlaps instead of Intersects to be more
             // tolerant about touching polygons.
             else if (bUseFastVersion ||
-                     !asPolyEx[i].sEnvelope.Intersects(asPolyEx[j].sEnvelope) ||
-                     !asPolyEx[i].poPolygon->Overlaps(asPolyEx[j].poPolygon))
+                     !thisPoly.poPolygon->Overlaps(otherPoly.poPolygon.get()))
             {
             }
             else
@@ -2141,27 +2289,28 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
 #ifdef DEBUG
                 char *wkt1 = nullptr;
                 char *wkt2 = nullptr;
-                asPolyEx[i].poPolygon->exportToWkt(&wkt1);
-                asPolyEx[j].poPolygon->exportToWkt(&wkt2);
+                thisPoly.poPolygon->exportToWkt(&wkt1);
+                otherPoly.poPolygon->exportToWkt(&wkt2);
+                const int realJ = static_cast<int>(&otherPoly - &asPolyEx[0]);
                 CPLDebug("OGR",
                          "Bad intersection for polygons %d and %d\n"
                          "geom %d: %s\n"
                          "geom %d: %s",
-                         static_cast<int>(i), j, static_cast<int>(i), wkt1, j,
-                         wkt2);
+                         static_cast<int>(i), realJ, static_cast<int>(i), wkt1,
+                         realJ, wkt2);
                 CPLFree(wkt1);
                 CPLFree(wkt2);
 #endif
             }
         }
 
-        if (j < 0)
+        if (j == nCandidates)
         {
             // We come here because we are not included in anything.
             // We are toplevel.
             nCountTopLevel++;
-            asPolyEx[i].bIsTopLevel = true;
-            asPolyEx[i].poEnclosingPolygon = nullptr;
+            thisPoly.bIsTopLevel = true;
+            thisPoly.poEnclosingPolygon = nullptr;
         }
     }
 
@@ -2178,7 +2327,7 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
         {
             sPolyEx.bIsTopLevel = true;
         }
-        nCountTopLevel = static_cast<int>(asPolyEx.size());
+        nCountTopLevel = asPolyEx.size();
     }
 
     /* -------------------------------------------------------------------- */
@@ -2192,31 +2341,34 @@ OGRGeometry *OGRGeometryFactory::organizePolygons(OGRGeometry **papoPolygons,
     // STEP 4: Add holes as rings of their enclosing polygon.
     for (auto &sPolyEx : asPolyEx)
     {
-        if (sPolyEx.bIsTopLevel == false)
+        if (!sPolyEx.bIsTopLevel)
         {
-            sPolyEx.poEnclosingPolygon->addRingDirectly(
-                sPolyEx.poPolygon->stealExteriorRingCurve());
-            delete sPolyEx.poPolygon;
+            sPolyEx.poEnclosingPolygon->addRing(std::unique_ptr<OGRCurve>(
+                sPolyEx.poPolygon->stealExteriorRingCurve()));
+            sPolyEx.poPolygon.reset();
         }
         else if (nCountTopLevel == 1)
         {
-            geom = sPolyEx.poPolygon;
+            geom = std::move(sPolyEx.poPolygon);
         }
     }
 
     // STEP 5: Add toplevel polygons.
     if (nCountTopLevel > 1)
     {
-        OGRGeometryCollection *poGC =
-            bHasCurves ? new OGRMultiSurface() : new OGRMultiPolygon();
+        std::unique_ptr<OGRMultiSurface> poMS;
+        if (bHasCurves)
+            poMS = std::make_unique<OGRMultiSurface>();
+        else
+            poMS = std::make_unique<OGRMultiPolygon>();
         for (auto &sPolyEx : asPolyEx)
         {
             if (sPolyEx.bIsTopLevel)
             {
-                poGC->addGeometryDirectly(sPolyEx.poPolygon);
+                poMS->addGeometry(std::move(sPolyEx.poPolygon));
             }
         }
-        geom = poGC;
+        geom = std::move(poMS);
     }
 
     return geom;

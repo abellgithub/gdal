@@ -322,6 +322,9 @@ bool OGRParquetWriterLayer::SetOptions(
     m_bWriteBBoxStruct =
         pszWriteCoveringBBox == nullptr || CPLTestBool(pszWriteCoveringBBox);
 
+    m_oBBoxStructFieldName =
+        CSLFetchNameValueDef(papszOptions, "COVERING_BBOX_NAME", "");
+
     if (CPLTestBool(CSLFetchNameValueDef(papszOptions, "SORT_BY_BBOX", "NO")))
     {
         const std::string osTmpGPKG(std::string(m_poDataset->GetDescription()) +
@@ -1277,7 +1280,7 @@ bool OGRParquetWriterLayer::IsArrowSchemaSupported(
 /*                            SetMetadata()                             */
 /************************************************************************/
 
-CPLErr OGRParquetWriterLayer::SetMetadata(char **papszMetadata,
+CPLErr OGRParquetWriterLayer::SetMetadata(CSLConstList papszMetadata,
                                           const char *pszDomain)
 {
     if (!pszDomain || !EQUAL(pszDomain, "SHAPEFILE"))
