@@ -180,6 +180,29 @@ SetBandIndicesFlattenedExpression(const std::string &origExpression,
 
 struct SourceProperties
 {
+    SourceProperties(const std::string &variable, const std::string &dsname)
+        : variable(variable), dsname(dsname)
+    {
+    }
+
+    SourceProperties(const SourceProperties &other)
+    {
+        variable = other.variable;
+        dsname = other.dsname;
+        nBands = other.nBands;
+        nX = other.nX;
+        nY = other.nY;
+        gt = other.gt;
+        if (other.srs)
+            srs.reset(other.srs->Clone());
+        noData = other.noData;
+        eDT = other.eDT;
+    }
+
+    bool read();
+
+    std::string variable{};
+    std::string dsname{};
     int nBands{0};
     int nX{0};
     int nY{0};
@@ -190,149 +213,135 @@ struct SourceProperties
     GDALDataType eDT{GDT_Unknown};
 };
 
-static std::optional<SourceProperties>
-UpdateSourceProperties(SourceProperties &out, const std::string &dsn,
-                       const GDALCalcOptions &options)
+bool SourceProperties::read()
 {
-    SourceProperties source;
-    bool srsMismatch = false;
-    bool extentMismatch = false;
-    bool dimensionMismatch = false;
+    std::unique_ptr<GDALDataset> ds(
+        GDALDataset::Open(dsname.c_str(), GDAL_OF_RASTER));
 
+    if (!ds)
     {
-        std::unique_ptr<GDALDataset> ds(
-            GDALDataset::Open(dsn.c_str(), GDAL_OF_RASTER));
+        CPLError(CE_Failure, CPLE_AppDefined, "Failed to open %s",
+                 dsname.c_str());
+        return false;
+    }
 
-        if (!ds)
+    nX = ds->GetRasterXSize();
+    nY = ds->GetRasterYSize();
+    nBands = ds->GetRasterCount();
+    noData.resize(nBands);
+    if (ds->GetSpatialRef())
+        srs.reset(ds->GetSpatialRef()->Clone());
+    ds->GetGeoTransform(gt);
+
+    eDT = ds->GetRasterBand(1)->GetRasterDataType();
+    for (int i = 2; i <= nBands; ++i)
+    {
+        GDALRasterBand *band = ds->GetRasterBand(i);
+
+        if (eDT != band->GetRasterDataType())
         {
-            CPLError(CE_Failure, CPLE_AppDefined, "Failed to open %s",
-                     dsn.c_str());
-            return std::nullopt;
-        }
-
-        source.nBands = ds->GetRasterCount();
-        source.nX = ds->GetRasterXSize();
-        source.nY = ds->GetRasterYSize();
-        source.noData.resize(source.nBands);
-
-        if (options.checkExtent)
-        {
-            ds->GetGeoTransform(source.gt);
-        }
-
-        if (options.checkCRS && out.srs)
-        {
-            const OGRSpatialReference *srs = ds->GetSpatialRef();
-            srsMismatch = srs && !srs->IsSame(out.srs.get());
-        }
-
-        // Store the source data type if it is the same for all bands in the source
-        bool bandsHaveSameType = true;
-        for (int i = 1; i <= source.nBands; ++i)
-        {
-            GDALRasterBand *band = ds->GetRasterBand(i);
-
-            if (i == 1)
-            {
-                source.eDT = band->GetRasterDataType();
-            }
-            else if (bandsHaveSameType &&
-                     source.eDT != band->GetRasterDataType())
-            {
-                source.eDT = GDT_Unknown;
-                bandsHaveSameType = false;
-            }
-
-            int success;
-            double noData = band->GetNoDataValue(&success);
-            if (success)
-            {
-                source.noData[i - 1] = noData;
-            }
+            eDT = GDT_Unknown;
+            break;
         }
     }
 
-    if (source.nX != out.nX || source.nY != out.nY)
+    for (int i = 1; i <= nBands; ++i)
     {
-        dimensionMismatch = true;
+        GDALRasterBand *band = ds->GetRasterBand(i);
+
+        int success;
+        double noDataVal = band->GetNoDataValue(&success);
+        if (success)
+            noData[i - 1] = noDataVal;
+    }
+    return true;
+}
+
+using SourceList = std::vector<SourceProperties>;
+
+// For each raster on which we're operating, verify that the properties are compatible.
+// Adjust the genericSource transform if necessary to handle varying resolutions.
+//
+// \return nullopt on failure or incompatability
+bool UpdateSourceProperties(SourceProperties &genericSource,
+                            SourceProperties &curSource,
+                            const GDALCalcOptions &options)
+{
+    if (options.checkCRS && genericSource.srs && curSource.srs &&
+        !curSource.srs->IsSame(genericSource.srs.get()))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Input spatial reference systems are inconsistent.");
+        return false;
     }
 
-    if (source.gt[0] != out.gt[0] || source.gt[2] != out.gt[2] ||
-        source.gt[3] != out.gt[3] || source.gt[4] != out.gt[4])
-    {
-        extentMismatch = true;
-    }
-    if (source.gt[1] != out.gt[1] || source.gt[5] != out.gt[5])
-    {
-        // Resolutions are different. Are the extents the same?
-        double xmaxOut = out.gt[0] + out.nX * out.gt[1] + out.nY * out.gt[2];
-        double yminOut = out.gt[3] + out.nX * out.gt[4] + out.nY * out.gt[5];
+    bool dimensionMismatch =
+        (curSource.nX != genericSource.nX || curSource.nY != genericSource.nY);
+    bool extentMismatch = (!curSource.gt.equalOrigins(genericSource.gt) ||
+                           !curSource.gt.equalRotations(genericSource.gt));
 
-        double xmax =
-            source.gt[0] + source.nX * source.gt[1] + source.nY * source.gt[2];
-        double ymin =
-            source.gt[3] + source.nX * source.gt[4] + source.nY * source.gt[5];
+    if (!curSource.gt.equalScales(genericSource.gt))
+    {
+        // Resolutions are different. Are transformed extents the same?
+        auto [xmaxOut, yminOut] =
+            genericSource.gt.Apply(genericSource.nX, genericSource.nY);
+        auto [xmax, ymin] = curSource.gt.Apply(curSource.nX, curSource.nY);
 
         // Max allowable extent misalignment, expressed as fraction of a pixel
         constexpr double EXTENT_RTOL = 1e-3;
 
-        if (std::abs(xmax - xmaxOut) > EXTENT_RTOL * std::abs(source.gt[1]) ||
-            std::abs(ymin - yminOut) > EXTENT_RTOL * std::abs(source.gt[5]))
-        {
-            extentMismatch = true;
-        }
+        //ABELL - This overrides extentMismatch set above. Is that correct?
+        extentMismatch = (std::abs(xmax - xmaxOut) >
+                              EXTENT_RTOL * std::abs(curSource.gt[1]) ||
+                          std::abs(ymin - yminOut) >
+                              EXTENT_RTOL * std::abs(curSource.gt[5]));
     }
 
     if (options.checkExtent && extentMismatch)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Input extents are inconsistent.");
-        return std::nullopt;
+        return false;
     }
 
     if (!options.checkExtent && dimensionMismatch)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Inputs do not have the same dimensions.");
-        return std::nullopt;
+        return false;
     }
 
     // Find a common resolution
-    if (source.nX > out.nX)
+    if (curSource.nX > genericSource.nX)
     {
-        auto dx = CPLGreatestCommonDivisor(out.gt[1], source.gt[1]);
+        auto dx =
+            CPLGreatestCommonDivisor(genericSource.gt[1], curSource.gt[1]);
         if (dx == 0)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Failed to find common resolution for inputs.");
-            return std::nullopt;
+            return false;
         }
-        out.nX = static_cast<int>(
-            std::round(static_cast<double>(out.nX) * out.gt[1] / dx));
-        out.gt[1] = dx;
+        genericSource.nX = static_cast<int>(std::round(
+            static_cast<double>(genericSource.nX) * genericSource.gt[1] / dx));
+        genericSource.gt[1] = dx;
     }
-    if (source.nY > out.nY)
+    if (curSource.nY > genericSource.nY)
     {
-        auto dy = CPLGreatestCommonDivisor(out.gt[5], source.gt[5]);
+        auto dy =
+            CPLGreatestCommonDivisor(genericSource.gt[5], curSource.gt[5]);
         if (dy == 0)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Failed to find common resolution for inputs.");
-            return std::nullopt;
+            return false;
         }
-        out.nY = static_cast<int>(
-            std::round(static_cast<double>(out.nY) * out.gt[5] / dy));
-        out.gt[5] = dy;
+        genericSource.nY = static_cast<int>(std::round(
+            static_cast<double>(genericSource.nY) * genericSource.gt[5] / dy));
+        genericSource.gt[5] = dy;
     }
 
-    if (srsMismatch)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Input spatial reference systems are inconsistent.");
-        return std::nullopt;
-    }
-
-    return source;
+    return true;
 }
 
 /** Create XML nodes for one or more derived bands resulting from the evaluation
@@ -348,20 +357,16 @@ UpdateSourceProperties(SourceProperties &out, const std::string &dsn,
  *                input datasets are multiband.
  * @param noDataText nodata value to use for the created band, or "none", or ""
  * @param pixelFunctionArguments Pixel function arguments.
- * @param sources Mapping of source names to DSNs
- * @param sourceProps Mapping of source names to properties
+ * @param sourceProps List of sources
  * @param fakeSourceFilename If not empty, used instead of real input filenames.
  * @return true if the band(s) were added, false otherwise
  */
-static bool
-CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
-                     GDALDataType bandType, const std::string &expression,
-                     const std::string &dialect, bool flatten,
-                     const std::string &noDataText,
-                     const std::vector<std::string> &pixelFunctionArguments,
-                     const std::map<std::string, std::string> &sources,
-                     const std::map<std::string, SourceProperties> &sourceProps,
-                     const std::string &fakeSourceFilename)
+static bool CreateDerivedBandXML(
+    CPLXMLNode *root, int nXOut, int nYOut, GDALDataType bandType,
+    const std::string &expression, const std::string &dialect, bool flatten,
+    const std::string &noDataText,
+    const std::vector<std::string> &pixelFunctionArguments,
+    const SourceList &sourceProps, const std::string &fakeSourceFilename)
 {
     int nOutBands = 1;  // By default, each expression produces a single output
                         // band. When processing the expression below, we may
@@ -402,12 +407,8 @@ CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
             }
         }
 
-        for (const auto &[source_name, dsn] : sources)
+        for (const SourceProperties &props : sourceProps)
         {
-            auto it = sourceProps.find(source_name);
-            CPLAssert(it != sourceProps.end());
-            const auto &props = it->second;
-
             bool expressionAppliedPerBand = false;
             if (dialect == "builtin")
             {
@@ -420,12 +421,12 @@ CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
                 if (flatten)
                 {
                     bandExpression = SetBandIndicesFlattenedExpression(
-                        bandExpression, source_name, props.nBands);
+                        bandExpression, props.variable, props.nBands);
                 }
 
                 bandExpression =
-                    SetBandIndices(bandExpression, source_name, nDefaultInBand,
-                                   expressionAppliedPerBand);
+                    SetBandIndices(bandExpression, props.variable,
+                                   nDefaultInBand, expressionAppliedPerBand);
             }
 
             if (expressionAppliedPerBand)
@@ -441,7 +442,7 @@ CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
                              "rasters with incompatible numbers of bands "
                              "(source %s has %d bands but expected to have "
                              "1 or %d bands).",
-                             source_name.c_str(), props.nBands, nOutBands);
+                             props.variable.c_str(), props.nBands, nOutBands);
                     return false;
                 }
             }
@@ -458,7 +459,7 @@ CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
                 }
                 else
                 {
-                    inBandVariable.Printf("%s[%d]", source_name.c_str(),
+                    inBandVariable.Printf("%s[%d]", props.variable.c_str(),
                                           nInBand);
                     if (bandExpression.find(inBandVariable) ==
                         std::string::npos)
@@ -485,7 +486,8 @@ CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
                 {
                     CPLAddXMLAttributeAndValue(sourceFilename, "relativeToVRT",
                                                "0");
-                    CPLCreateXMLNode(sourceFilename, CXT_Text, dsn.c_str());
+                    CPLCreateXMLNode(sourceFilename, CXT_Text,
+                                     props.dsname.c_str());
                 }
                 else
                 {
@@ -586,97 +588,105 @@ CreateDerivedBandXML(CPLXMLNode *root, int nXOut, int nYOut,
     return true;
 }
 
-static bool ParseSourceDescriptors(const std::vector<std::string> &inputs,
-                                   std::map<std::string, std::string> &datasets,
-                                   std::string &firstSourceName,
-                                   bool requireSourceNames)
+namespace
 {
-    for (size_t iInput = 0; iInput < inputs.size(); iInput++)
-    {
-        const std::string &input = inputs[iInput];
-        std::string name;
 
-        const auto pos = input.find('=');
-        if (pos == std::string::npos)
+/// Parse an input string into variable and dataset names.
+/// \param  input  Input descriptor to parse.
+/// \param  variable  Parsed variable name, or '_' if there was none.
+/// \param  dsn  Parsed dataset name.
+/// \return Error string, or empty string if OK.
+std::string parseInput(const std::string &input, std::string &variable,
+                       std::string &dsn)
+{
+    const auto pos = input.find('=');
+    if (pos == std::string::npos)
+    {
+        variable = "_";
+        dsn = input;
+    }
+    else
+    {
+        variable = input.substr(0, pos);
+        dsn = input.substr(pos + 1);
+        if (variable.empty())
+            return "No variable name provided for dataset. Format: "
+                   "name=dataset";
+        if (!std::isalpha(variable[0]))
+            return "Invalid variable name '" + variable +
+                   "'.  Variable names must"
+                   " start with a letter.";
+        for (size_t i = 1; i < variable.size(); ++i)
+        {
+            char c = variable[i];
+            if (!std::isalnum(c) && c != '_')
+                return "Invalid variable name '" + variable +
+                       "': invalid  character: '" + std::string(1, c) +
+                       "' -- must be alphanumeric or '_'.";
+        }
+    }
+
+    if (!dsn.empty() && dsn.front() == '[' && dsn.back() == ']')
+        dsn = "{\"type\":\"gdal_streamed_alg\", \"command_line\":\"gdal "
+              "raster pipeline " +
+              CPLString(dsn.substr(1, dsn.size() - 2))
+                  .replaceAll('\\', "\\\\")
+                  .replaceAll('"', "\\\"") +
+              "\"}";
+    return "";
+}
+
+bool ParseSourceDescriptors(const std::vector<std::string> &inputs,
+                            SourceList &datasets, bool requireSourceNames)
+{
+    int unnamedCount = 0;
+    std::string unnamedDsn =
+        "X";  // Not sure why we use X. Maybe it's already used?
+    for (const std::string &input : inputs)
+    {
+        std::string variable;
+        std::string dsn;
+        std::string err = parseInput(input, variable, dsn);
+        if (err.size())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "%s", err.c_str());
+            return false;
+        }
+
+        auto it = std::find_if(datasets.begin(), datasets.end(),
+                               [variable](SourceProperties &src)
+                               { return src.variable == variable; });
+        if (it != datasets.end())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "An input with name '%s' has already been provided",
+                     variable.c_str());
+            return false;
+        }
+
+        // No varaible name was provided.
+        if (variable == "_")
         {
             if (requireSourceNames && inputs.size() > 1)
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
-                         "Inputs must be named when more than one input is "
-                         "provided.");
+                         "Inputs must be named when more than "
+                         "one input is provided.");
                 return false;
             }
-            name = "X";
-            if (iInput > 0)
-            {
-                name += std::to_string(iInput);
-            }
-        }
-        else
-        {
-            name = input.substr(0, pos);
+            variable = unnamedDsn;
+            if (unnamedCount)
+                variable += std::to_string(unnamedCount);
+            unnamedCount++;
         }
 
-        // Check input name is legal
-        for (size_t i = 0; i < name.size(); ++i)
-        {
-            const char c = name[i];
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
-            {
-                // ok
-            }
-            else if (c == '_' || (c >= '0' && c <= '9'))
-            {
-                if (i == 0)
-                {
-                    // Reserved constants in MuParser start with an underscore
-                    CPLError(
-                        CE_Failure, CPLE_AppDefined,
-                        "Name '%s' is illegal because it starts with a '%c'",
-                        name.c_str(), c);
-                    return false;
-                }
-            }
-            else
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Name '%s' is illegal because character '%c' is not "
-                         "allowed",
-                         name.c_str(), c);
-                return false;
-            }
-        }
-
-        std::string dsn =
-            (pos == std::string::npos) ? input : input.substr(pos + 1);
-
-        if (!dsn.empty() && dsn.front() == '[' && dsn.back() == ']')
-        {
-            dsn = "{\"type\":\"gdal_streamed_alg\", \"command_line\":\"gdal "
-                  "raster pipeline " +
-                  CPLString(dsn.substr(1, dsn.size() - 2))
-                      .replaceAll('\\', "\\\\")
-                      .replaceAll('"', "\\\"") +
-                  "\"}";
-        }
-
-        if (datasets.find(name) != datasets.end())
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "An input with name '%s' has already been provided",
-                     name.c_str());
-            return false;
-        }
-        datasets[name] = std::move(dsn);
-
-        if (iInput == 0)
-        {
-            firstSourceName = std::move(name);
-        }
+        datasets.emplace_back(variable, dsn);
     }
 
     return true;
 }
+
+}  // unnamed namespace
 
 static bool ReadFileLists(const std::vector<GDALArgDatasetValue> &inputDS,
                           std::vector<std::string> &inputFilenames)
@@ -745,61 +755,29 @@ static std::unique_ptr<GDALDataset> GDALCalcCreateVRTDerived(
         return nullptr;
     }
 
-    std::map<std::string, std::string> sources;
-    std::string firstSource;
     bool requireSourceNames = dialect != "builtin";
-    if (!ParseSourceDescriptors(inputs, sources, firstSource,
-                                requireSourceNames))
-    {
+    SourceList sources;
+    if (!ParseSourceDescriptors(inputs, sources, requireSourceNames))
         return nullptr;
-    }
 
-    // Use the first source provided to determine properties of the output
-    const char *firstDSN = sources[firstSource].c_str();
-
-    maxSourceBands = 0;
-
-    // Read properties from the first source
-    SourceProperties out;
+    maxSourceBands = 1;
+    for (SourceProperties &source : sources)
     {
-        std::unique_ptr<GDALDataset> ds(
-            GDALDataset::Open(firstDSN, GDAL_OF_RASTER));
-
-        if (!ds)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined, "Failed to open %s",
-                     firstDSN);
+        if (!source.read())
             return nullptr;
-        }
-
-        out.nX = ds->GetRasterXSize();
-        out.nY = ds->GetRasterYSize();
-        out.nBands = 1;
-        out.srs.reset(ds->GetSpatialRef() ? ds->GetSpatialRef()->Clone()
-                                          : nullptr);
-        ds->GetGeoTransform(out.gt);
+        maxSourceBands = std::max(maxSourceBands, source.nBands);
     }
 
     CPLXMLTreeCloser root(CPLCreateXMLNode(nullptr, CXT_Element, "VRTDataset"));
 
-    maxSourceBands = 0;
-
-    // Collect properties of the different sources, and verity them for
+    // Collect properties of the different sources, and verify them for
     // consistency.
-    std::map<std::string, SourceProperties> sourceProps;
-    for (const auto &[source_name, dsn] : sources)
+    SourceProperties genericSource = sources.front();
+    for (size_t i = 0; i < sources.size(); ++i)
     {
-        // TODO avoid opening the first source twice.
-        auto props = UpdateSourceProperties(out, dsn, options);
-        if (props.has_value())
-        {
-            maxSourceBands = std::max(maxSourceBands, props->nBands);
-            sourceProps[source_name] = std::move(props.value());
-        }
-        else
-        {
+        SourceProperties &curSource = sources[i];
+        if (!UpdateSourceProperties(genericSource, curSource, options))
             return nullptr;
-        }
     }
 
     size_t iExpr = 0;
@@ -814,13 +792,11 @@ static std::unique_ptr<GDALDataset> GDALCalcCreateVRTDerived(
             (origExpression == "min" || origExpression == "max" ||
              origExpression == "mode"))
         {
-            for (const auto &[_, props] : sourceProps)
+            for (SourceProperties &prop : sources)
             {
                 if (bandType == GDT_Unknown)
-                {
-                    bandType = props.eDT;
-                }
-                else if (props.eDT == GDT_Unknown || props.eDT != bandType)
+                    bandType = prop.eDT;
+                else if (prop.eDT == GDT_Unknown || prop.eDT != bandType)
                 {
                     bandType = GDT_Unknown;
                     break;
@@ -828,10 +804,10 @@ static std::unique_ptr<GDALDataset> GDALCalcCreateVRTDerived(
             }
         }
 
-        if (!CreateDerivedBandXML(root.get(), out.nX, out.nY, bandType,
-                                  origExpression, dialect, flatten, noData,
-                                  pixelFunctionArguments[iExpr], sources,
-                                  sourceProps, fakeSourceFilename))
+        if (!CreateDerivedBandXML(
+                root.get(), genericSource.nX, genericSource.nY, bandType,
+                origExpression, dialect, flatten, noData,
+                pixelFunctionArguments[iExpr], sources, fakeSourceFilename))
         {
             return nullptr;
         }
@@ -839,19 +815,19 @@ static std::unique_ptr<GDALDataset> GDALCalcCreateVRTDerived(
     }
 
     //CPLDebug("VRT", "%s", CPLSerializeXMLTree(root.get()));
+    //        std::cerr << CPLSerializeXMLTree(root.get()) << "!\n";
 
-    auto ds = fakeSourceFilename.empty()
-                  ? std::make_unique<VRTDataset>(out.nX, out.nY)
-                  : std::make_unique<VRTDataset>(1, 1);
+    auto ds =
+        fakeSourceFilename.empty()
+            ? std::make_unique<VRTDataset>(genericSource.nX, genericSource.nY)
+            : std::make_unique<VRTDataset>(1, 1);
     if (ds->XMLInit(root.get(), "") != CE_None)
     {
         return nullptr;
     };
-    ds->SetGeoTransform(out.gt);
-    if (out.srs)
-    {
-        ds->SetSpatialRef(out.srs.get());
-    }
+    ds->SetGeoTransform(genericSource.gt);
+    if (genericSource.srs)
+        ds->SetSpatialRef(genericSource.srs.get());
 
     return ds;
 }

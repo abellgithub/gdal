@@ -115,6 +115,21 @@ class CPL_DLL GDALGeoTransform
         return !(operator==(other));
     }
 
+    bool equalOrigins(const GDALGeoTransform &other)
+    {
+        return xorig == other.xorig && yorig == other.yorig;
+    }
+
+    bool equalRotations(const GDALGeoTransform &other)
+    {
+        return xrot == other.xrot && yrot == other.yrot;
+    }
+
+    bool equalScales(const GDALGeoTransform &other)
+    {
+        return xscale == other.xscale && yscale == other.yscale;
+    }
+
     /** Cast to const double* */
     inline const double *data() const
     {

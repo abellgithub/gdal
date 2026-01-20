@@ -364,9 +364,9 @@ def test_gdalalg_raster_calc_several_inputs_no_name(calc, tmp_vsimem, dialect):
 @pytest.mark.parametrize(
     "name,expected_error_msg",
     [
-        ("_pi", "Name '_pi' is illegal because it starts with a '_'"),
-        ("0ko", "Name '0ko' is illegal because it starts with a '0'"),
-        ("ko-", "Name 'ko-' is illegal because character '-' is not allowed"),
+        ("_pi", "Invalid variable name.*"),
+        ("0ko", "Invalid variable name.*"),
+        ("ko-", "Invalid variable name.*"),
         ("ok", None),
         ("ok_", None),
         ("o0123456789", None),
