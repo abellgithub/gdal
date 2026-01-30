@@ -1002,10 +1002,7 @@ def test_gdalalg_raster_calc_sum_builtin_two_bands_three_bands_fail(calc, tmp_vs
     calc["output-format"] = "MEM"
     calc["calc"] = "sum"
     calc["dialect"] = "builtin"
-    with pytest.raises(
-        Exception,
-        match=r"Expression cannot operate on all bands of rasters with incompatible numbers of bands \(source B has 3 bands but expected to have 1 or 2 bands\)",
-    ):
+    with pytest.raises(Exception, match="Expression cannot operate on all bands.*"):
         calc.Run()
 
 

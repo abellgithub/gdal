@@ -189,6 +189,7 @@ SetBandIndicesFlattenedExpression(const std::string &origExpression,
     return expression;
 }
 
+// Container for all properties of a dataset.
 struct SourceProperties
 {
     SourceProperties(const std::string &variable, const std::string &dsname)
@@ -196,6 +197,7 @@ struct SourceProperties
     {
     }
 
+    // Copy ctor needed for SRS.
     SourceProperties(const SourceProperties &other)
     {
         variable = other.variable;
@@ -224,6 +226,7 @@ struct SourceProperties
     GDALDataType eDT{GDT_Unknown};
 };
 
+// Read a dataset, setting properties.
 bool SourceProperties::read()
 {
     std::unique_ptr<GDALDataset> ds(
@@ -243,9 +246,7 @@ bool SourceProperties::read()
     eDT = ds->GetRasterBand(1)->GetRasterDataType();
     for (int i = 2; i <= nBands; ++i)
     {
-        GDALRasterBand *band = ds->GetRasterBand(i);
-
-        if (eDT != band->GetRasterDataType())
+        if (eDT != ds->GetRasterBand(i)->GetRasterDataType())
         {
             eDT = GDT_Unknown;
             break;
@@ -254,10 +255,8 @@ bool SourceProperties::read()
 
     for (int i = 1; i <= nBands; ++i)
     {
-        GDALRasterBand *band = ds->GetRasterBand(i);
-
         int success;
-        double noDataVal = band->GetNoDataValue(&success);
+        double noDataVal = ds->GetRasterBand(i)->GetNoDataValue(&success);
         if (success)
             noData[i - 1] = noDataVal;
     }
@@ -424,7 +423,7 @@ static bool CreateDerivedBandXML(
                         "rasters with incompatible numbers of bands (source " +
                         props.variable + " has " +
                         std::to_string(props.nBands) +
-                        " bands but is expected to have 1 or " +
+                        " bands but expected to have 1 or " +
                         std::to_string(nOutBands) + " bands)");
             }
 
@@ -614,12 +613,37 @@ std::string parseInput(const std::string &input, std::string &variable,
     return "";
 }
 
-bool ParseSourceDescriptors(const std::vector<std::string> &inputs,
-                            SourceList &datasets, bool requireSourceNames)
+bool ParseBuiltinSourceDescriptors(const std::vector<std::string> &inputs,
+                                   SourceList &datasets)
 {
-    int unnamedCount = 0;
-    std::string unnamedDsn =
+    const std::string unnamedDsn =
         "X";  // Not sure why we use X. Maybe it's already used?
+
+    for (size_t i = 0; i < inputs.size(); ++i)
+    {
+        const std::string &input = inputs[i];
+
+        std::string variable;
+        std::string dsn;
+        std::string err = parseInput(input, variable, dsn);
+        if (err.size())
+            return error(err);
+
+        // Ignore any parsed dataset name in builtin mode.
+        variable = unnamedDsn + std::to_string(i);
+        datasets.emplace_back(variable, dsn);
+    }
+
+    return true;
+}
+
+// Parse source input descriptors and create a list of SourceProperties
+bool ParseSourceDescriptors(const std::vector<std::string> &inputs,
+                            SourceList &datasets)
+{
+    // Not sure why we use X. Maybe it's already used?
+    const std::string unnamedDsn = "X";
+
     for (const std::string &input : inputs)
     {
         std::string variable;
@@ -638,16 +662,12 @@ bool ParseSourceDescriptors(const std::vector<std::string> &inputs,
         // No varaible name was provided.
         if (variable == "_")
         {
-            if (requireSourceNames && inputs.size() > 1)
+            if (inputs.size() > 1)
                 return error("Inputs must be named when more than one input is "
                              "provided.");
 
             variable = unnamedDsn;
-            if (unnamedCount)
-                variable += std::to_string(unnamedCount);
-            unnamedCount++;
         }
-
         datasets.emplace_back(variable, dsn);
     }
 
@@ -716,13 +736,15 @@ static std::unique_ptr<GDALDataset> GDALCalcCreateVRTDerived(
     const std::string &fakeSourceFilename = std::string())
 {
     if (inputs.empty())
-    {
         return nullptr;
-    }
 
-    bool requireSourceNames = dialect != "builtin";
     SourceList sources;
-    if (!ParseSourceDescriptors(inputs, sources, requireSourceNames))
+    bool ok;
+    if (dialect == "builtin")
+        ok = ParseBuiltinSourceDescriptors(inputs, sources);
+    else
+        ok = ParseSourceDescriptors(inputs, sources);
+    if (!ok)
         return nullptr;
 
     maxSourceBands = 1;
