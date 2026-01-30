@@ -37,6 +37,17 @@ struct GDALCalcOptions
     bool checkExtent{true};
 };
 
+namespace
+{
+
+bool error(const std::string &msg)
+{
+    CPLError(CE_Failure, CPLE_AppDefined, "%s", msg.c_str());
+    return false;
+}
+
+}  // namespace
+
 static bool MatchIsCompleteVariableNameWithNoIndex(const std::string &str,
                                                    size_t from, size_t to)
 {
@@ -219,11 +230,7 @@ bool SourceProperties::read()
         GDALDataset::Open(dsname.c_str(), GDAL_OF_RASTER));
 
     if (!ds)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "Failed to open %s",
-                 dsname.c_str());
-        return false;
-    }
+        return error("Failed to open " + dsname);
 
     nX = ds->GetRasterXSize();
     nY = ds->GetRasterYSize();
@@ -269,11 +276,7 @@ bool UpdateSourceProperties(SourceProperties &genericSource,
 {
     if (options.checkCRS && genericSource.srs && curSource.srs &&
         !curSource.srs->IsSame(genericSource.srs.get()))
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Input spatial reference systems are inconsistent.");
-        return false;
-    }
+        return error("Input spatial reference systems are inconsistent.");
 
     bool dimensionMismatch =
         (curSource.nX != genericSource.nX || curSource.nY != genericSource.nY);
@@ -298,18 +301,10 @@ bool UpdateSourceProperties(SourceProperties &genericSource,
     }
 
     if (options.checkExtent && extentMismatch)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Input extents are inconsistent.");
-        return false;
-    }
+        return error("Input extents are inconsistent.");
 
     if (!options.checkExtent && dimensionMismatch)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Inputs do not have the same dimensions.");
-        return false;
-    }
+        return error("Inputs do not have the same dimensions.");
 
     // Find a common resolution
     if (curSource.nX > genericSource.nX)
@@ -317,11 +312,8 @@ bool UpdateSourceProperties(SourceProperties &genericSource,
         auto dx =
             CPLGreatestCommonDivisor(genericSource.gt[1], curSource.gt[1]);
         if (dx == 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Failed to find common resolution for inputs.");
-            return false;
-        }
+            return error("Failed to find common resolution for inputs.");
+
         genericSource.nX = static_cast<int>(std::round(
             static_cast<double>(genericSource.nX) * genericSource.gt[1] / dx));
         genericSource.gt[1] = dx;
@@ -331,11 +323,8 @@ bool UpdateSourceProperties(SourceProperties &genericSource,
         auto dy =
             CPLGreatestCommonDivisor(genericSource.gt[5], curSource.gt[5]);
         if (dy == 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Failed to find common resolution for inputs.");
-            return false;
-        }
+            return error("Failed to find common resolution for inputs.");
+
         genericSource.nY = static_cast<int>(std::round(
             static_cast<double>(genericSource.nY) * genericSource.gt[5] / dy));
         genericSource.gt[5] = dy;
@@ -400,11 +389,7 @@ static bool CreateDerivedBandXML(
             char *end;
             dstNoData = CPLStrtod(noDataText.c_str(), &end);
             if (end != noDataText.c_str() + noDataText.size())
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Invalid NoData value: %s", noDataText.c_str());
-                return false;
-            }
+                return error("Invalid NoData value: " + noDataText);
         }
 
         for (const SourceProperties &props : sourceProps)
@@ -432,19 +417,15 @@ static bool CreateDerivedBandXML(
             if (expressionAppliedPerBand)
             {
                 if (nOutBands <= 1)
-                {
                     nOutBands = props.nBands;
-                }
                 else if (props.nBands != 1 && props.nBands != nOutBands)
-                {
-                    CPLError(CE_Failure, CPLE_AppDefined,
-                             "Expression cannot operate on all bands of "
-                             "rasters with incompatible numbers of bands "
-                             "(source %s has %d bands but expected to have "
-                             "1 or %d bands).",
-                             props.variable.c_str(), props.nBands, nOutBands);
-                    return false;
-                }
+                    return error(
+                        "Expression cannot operate on all bands of "
+                        "rasters with incompatible numbers of bands (source " +
+                        props.variable + " has " +
+                        std::to_string(props.nBands) +
+                        " bands but is expected to have 1 or " +
+                        std::to_string(nOutBands) + " bands)");
             }
 
             // Create a source for each input band that is used in
@@ -540,13 +521,10 @@ static bool CreateDerivedBandXML(
             if (dstNoData.has_value())
             {
                 if (!GDALIsValueExactAs(dstNoData.value(), bandType))
-                {
-                    CPLError(
-                        CE_Failure, CPLE_AppDefined,
-                        "Band output type %s cannot represent NoData value %g",
-                        GDALGetDataTypeName(bandType), dstNoData.value());
-                    return false;
-                }
+                    return error("Band output type " +
+                                 std::string(GDALGetDataTypeName(bandType)) +
+                                 " cannot represent NoData value " +
+                                 std::to_string(dstNoData.value()));
 
                 CPLXMLNode *noDataNode =
                     CPLCreateXMLNode(band, CXT_Element, "NoDataValue");
@@ -648,32 +626,22 @@ bool ParseSourceDescriptors(const std::vector<std::string> &inputs,
         std::string dsn;
         std::string err = parseInput(input, variable, dsn);
         if (err.size())
-        {
-            CPLError(CE_Failure, CPLE_AppDefined, "%s", err.c_str());
-            return false;
-        }
+            return error(err);
 
         auto it = std::find_if(datasets.begin(), datasets.end(),
                                [variable](SourceProperties &src)
                                { return src.variable == variable; });
         if (it != datasets.end())
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "An input with name '%s' has already been provided",
-                     variable.c_str());
-            return false;
-        }
+            return error("An input with name '" + variable +
+                         "' has already been provided.");
 
         // No varaible name was provided.
         if (variable == "_")
         {
             if (requireSourceNames && inputs.size() > 1)
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Inputs must be named when more than "
-                         "one input is provided.");
-                return false;
-            }
+                return error("Inputs must be named when more than one input is "
+                             "provided.");
+
             variable = unnamedDsn;
             if (unnamedCount)
                 variable += std::to_string(unnamedCount);
@@ -699,11 +667,8 @@ static bool ReadFileLists(const std::vector<GDALArgDatasetValue> &inputDS,
             auto f =
                 VSIVirtualHandleUniquePtr(VSIFOpenL(input.c_str() + 1, "r"));
             if (!f)
-            {
-                CPLError(CE_Failure, CPLE_FileIO, "Cannot open %s",
-                         input.c_str() + 1);
-                return false;
-            }
+                return error("Cannot open " + input.substr(1));
+
             while (const char *filename = CPLReadLineL(f.get()))
             {
                 inputFilenames.push_back(filename);
