@@ -14,7 +14,6 @@
 #define CPL_WORKER_THREAD_POOL_H_INCLUDED_
 
 #include "cpl_multiproc.h"
-#include "cpl_list.h"
 
 #include <condition_variable>
 #include <functional>
