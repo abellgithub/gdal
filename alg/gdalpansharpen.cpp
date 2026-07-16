@@ -33,6 +33,7 @@
 #include "../frmts/vrt/vrtdataset.h"
 #include "gdal_priv.h"
 #include "gdal_priv_templates.hpp"
+#include "gdal_thread_pool.h"
 // #include "gdalsse_priv.h"
 
 // Limit types to practical use cases.
@@ -439,11 +440,11 @@ GDALPansharpenOperation::Initialize(const GDALPansharpenOptions *psOptionsIn)
                     return CE_Failure;
                 aMSBands[i] = poVRTBand;
                 poVRTBand->SetNoDataValue(psOptions->dfNoData);
-                const char *pszNBITS =
-                    poSrcBand->GetMetadataItem("NBITS", "IMAGE_STRUCTURE");
+                const char *pszNBITS = poSrcBand->GetMetadataItem(
+                    GDALMD_NBITS, GDAL_MDD_IMAGE_STRUCTURE);
                 if (pszNBITS)
-                    poVRTBand->SetMetadataItem("NBITS", pszNBITS,
-                                               "IMAGE_STRUCTURE");
+                    poVRTBand->SetMetadataItem(GDALMD_NBITS, pszNBITS,
+                                               GDAL_MDD_IMAGE_STRUCTURE);
 
                 VRTSimpleSource *poSimpleSource = new VRTSimpleSource();
                 poVRTBand->ConfigureSource(
@@ -461,15 +462,8 @@ GDALPansharpenOperation::Initialize(const GDALPansharpenOptions *psOptionsIn)
         nThreads = CPLGetNumCPUs();
     else if (nThreads == 0)
     {
-        const char *pszNumThreads =
-            CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
-        if (pszNumThreads)
-        {
-            if (EQUAL(pszNumThreads, "ALL_CPUS"))
-                nThreads = CPLGetNumCPUs();
-            else
-                nThreads = std::max(0, std::min(128, atoi(pszNumThreads)));
-        }
+        nThreads = GDALGetNumThreads(GDAL_DEFAULT_MAX_THREAD_COUNT,
+                                     /* bDefaultAllCPUs = */ false);
     }
     if (nThreads > 1)
     {
@@ -1311,11 +1305,11 @@ CPLErr GDALPansharpenOperation::ProcessRegion(int nXOff, int nYOff, int nXSize,
                 poMEMDS, i + 1, pabyBuffer, eWorkDataType, 0, 0, false);
             poMEMDS->AddMEMBand(hMEMBand);
 
-            const char *pszNBITS =
-                aMSBands[i]->GetMetadataItem("NBITS", "IMAGE_STRUCTURE");
+            const char *pszNBITS = aMSBands[i]->GetMetadataItem(
+                GDALMD_NBITS, GDAL_MDD_IMAGE_STRUCTURE);
             if (pszNBITS)
                 poMEMDS->GetRasterBand(i + 1)->SetMetadataItem(
-                    "NBITS", pszNBITS, "IMAGE_STRUCTURE");
+                    GDALMD_NBITS, pszNBITS, GDAL_MDD_IMAGE_STRUCTURE);
 
             if (psOptions->bHasNoData)
                 poMEMDS->GetRasterBand(i + 1)->SetNoDataValue(
@@ -1490,7 +1484,7 @@ CPLErr GDALPansharpenOperation::ProcessRegion(int nXOff, int nYOff, int nXSize,
             GDALRasterBand *poBand = aMSBands[i];
             int nBandBitDepth = 0;
             const char *pszNBITS =
-                poBand->GetMetadataItem("NBITS", "IMAGE_STRUCTURE");
+                poBand->GetMetadataItem(GDALMD_NBITS, GDAL_MDD_IMAGE_STRUCTURE);
             if (pszNBITS)
                 nBandBitDepth = atoi(pszNBITS);
             if (nBandBitDepth < nBitDepth)

@@ -1,5 +1,7 @@
 .. _gdal_vector_filter:
 
+.. program:: gdal_vector_filter
+
 ================================================================================
 ``gdal vector filter``
 ================================================================================
@@ -89,6 +91,11 @@ Standard Options
 
     .. include:: gdal_options/upsert.rst
 
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
+
 Examples
 --------
 
@@ -98,3 +105,23 @@ Examples
    .. code-block:: bash
 
         $ gdal vector filter --bbox=2,49,3,50 in.gpkg out.gpkg --overwrite
+
+.. example::
+   :title: Filter Shapefile features with an attribute query
+   :id: gdal-vector-filter-where
+
+   .. tabs::
+
+      .. code-tab:: bash
+
+        gdal vector pipeline \
+            ! read in.shp \
+            ! filter --where "CODE IS NULL AND NAME NOT LIKE 'TEMP%'" \
+            ! write out.gpkg
+
+      .. code-tab:: ps1
+
+        gdal vector pipeline `
+            ! read in.shp `
+            ! filter --where "CODE IS NULL AND NAME NOT LIKE 'TEMP%'" `
+            ! write out.gpkg

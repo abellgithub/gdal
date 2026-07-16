@@ -36,9 +36,9 @@ GDALVectorRasterizeAlgorithm::GDALVectorRasterizeAlgorithm(bool bStandaloneStep)
               .SetStandaloneStep(bStandaloneStep)
               .SetOutputFormatCreateCapability(GDAL_DCAP_CREATE))
 {
-    AddProgressArg();
     if (bStandaloneStep)
     {
+        AddProgressArg();
         AddOutputFormatArg(&m_format)
             .AddMetadataItem(GAAMDI_REQUIRED_CAPABILITIES,
                              {GDAL_DCAP_RASTER, GDAL_DCAP_CREATE})
@@ -53,6 +53,10 @@ GDALVectorRasterizeAlgorithm::GDALVectorRasterizeAlgorithm(bool bStandaloneStep)
             .SetDatasetInputFlags(GADV_NAME | GADV_OBJECT);
         AddCreationOptionsArg(&m_creationOptions);
         AddOverwriteArg(&m_overwrite);
+    }
+    else
+    {
+        AddVectorHiddenInputDatasetArg();
     }
 
     AddBandArg(&m_bands, _("The band(s) to burn values into (1-based index)"));
@@ -89,17 +93,20 @@ GDALVectorRasterizeAlgorithm::GDALVectorRasterizeAlgorithm(bool bStandaloneStep)
         .SetMaxCount(4)
         .SetRepeatedArgAllowed(false)
         .SetMetaVar("<xmin>,<ymin>,<xmax>,<ymax>");
-    AddArg("resolution", 0, _("Set the target resolution"), &m_targetResolution)
-        .SetMinCount(2)
-        .SetMaxCount(2)
-        .SetRepeatedArgAllowed(false)
-        .SetMetaVar("<xres>,<yres>")
-        .SetMutualExclusionGroup("size-or-resolution");
+    auto &argResolution =
+        AddArg("resolution", 0, _("Set the target resolution"),
+               &m_targetResolution)
+            .SetMinCount(2)
+            .SetMaxCount(2)
+            .SetRepeatedArgAllowed(false)
+            .SetMetaVar("<xres>,<yres>")
+            .SetMutualExclusionGroup("size-or-resolution");
     AddArg("target-aligned-pixels", 0,
            _("(target aligned pixels) Align the coordinates of the extent of "
              "the output file to the values of the resolution"),
            &m_tap)
-        .AddAlias("tap");
+        .AddAlias("tap")
+        .AddDirectDependency(argResolution);
     AddArg("size", 0, _("Set the target size in pixels and lines"),
            &m_targetSize)
         .SetMinCount(2)
