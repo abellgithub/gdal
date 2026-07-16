@@ -346,7 +346,7 @@ set(QUICKTEST_LIST
     test-block-cache-limit
     test-multi-threaded-writing
     test-destroy
-    test-bug1488
+    test-hang
     test-log
     test-deferred-plugin
 )
@@ -394,9 +394,9 @@ gdal_autotest_target(test_c_include_from_cpp_file test-C-include-from-CPP-file
         "")
 
 
-gdal_gtest_target(bug1488 test-bug1488
+gdal_gtest_target(hang test-hang
     FILES
-        bug1488.cpp)
+        hang.cpp)
 gdal_gtest_target(testlog test-log
     FILES
         testlog.cpp)
