@@ -37,10 +37,15 @@ TEST(hang, test)
         {
             std::vector<char> buf(size);
 
+            std::cerr << "Enter!\n";
             VSILFILE *file = VSIFOpenL(url.c_str(), "rb");
+            std::cerr << "Opened!\n";
             VSIFSeekL(file, 375, SEEK_SET);
+            std::cerr << "Seeked!\n";
             VSIFReadL(buf.data(), 1, size, file);
+            std::cerr << "Read!\n";
             VSIFCloseL(file);
+            std::cerr << "Closed!\n";
             int sum = 0;
             for (char c : buf)
                 sum += (uint8_t)c;
