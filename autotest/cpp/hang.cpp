@@ -39,12 +39,13 @@ TEST(hang, test)
 
             std::cerr << "Enter!\n";
             VSILFILE *file = VSIFOpenL(url.c_str(), "rb");
-            std::cerr << "Opened!\n";
             if (!file)
             {
                 std::cerr << "Couldn't open file!\n";
+                EXPECT_TRUE(false);
                 return;
             }
+            std::cerr << "Opened!\n";
             VSIFSeekL(file, 375, SEEK_SET);
             std::cerr << "Seeked!\n";
             VSIFReadL(buf.data(), 1, size, file);

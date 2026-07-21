@@ -4329,10 +4329,7 @@ VSIFilesystemHandler *VSIFileManager::GetHandler(const char *pszPath)
             const char *pszIterKey = key.c_str();
             const size_t nIterKeyLen = key.size();
             if (strncmp(pszPath, pszIterKey, nIterKeyLen) == 0)
-            {
-                std::cerr << "Found handler for " << pszIterKey << "!\n";
                 return handler.get();
-            }
 
             // "/vsimem\foo" should be handled as "/vsimem/foo".
             if (nIterKeyLen && nPathLen > nIterKeyLen &&
