@@ -15,6 +15,7 @@
 #include "cpl_vsil_curl_class.h"
 
 #include <algorithm>
+#include <iostream>
 #include <array>
 #include <limits>
 #include <map>
@@ -4661,6 +4662,7 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
     if (!bStartsWithVSICurlPrefix &&
         !cpl::starts_with(std::string_view(pszFilename), GetFSPrefix()))
     {
+        std::cerr << "No curl prefix!\n";
         return nullptr;
     }
 
@@ -4736,6 +4738,7 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
             }
             else
             {
+                std::cerr << "Could find file!\n";
                 return nullptr;
             }
         }
@@ -4745,23 +4748,29 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
     if (GetCachedFileProp(osURL.c_str(), cachedFileProp) &&
         cachedFileProp.eExists == EXIST_YES && cachedFileProp.bIsDirectory)
     {
+        std::cerr << "Cached!\n";
         return nullptr;
     }
 
     auto poHandle =
         std::unique_ptr<VSICurlHandle>(CreateFileHandle(osFilename.c_str()));
     if (poHandle == nullptr)
+    {
+        std::cerr << "Couldn't create file handle!\n";
         return nullptr;
+    }
     poHandle->SetCache(bCache);
     if (!bGotFileList || bForceExistsCheck)
     {
         // If we didn't get a filelist, check that the file really exists.
         if (!poHandle->Exists(bSetError))
         {
+            std::cerr << "No filelist, doesn't exist!\n";
             return nullptr;
         }
     }
 
+    std::cerr << "At end of open!\n";
     if (CPLTestBool(CPLGetConfigOption("VSI_CACHE", "FALSE")))
         return VSIVirtualHandleUniquePtr(
             VSICreateCachedFile(poHandle.release()));
