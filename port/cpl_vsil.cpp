@@ -2904,8 +2904,12 @@ VSILFILE *VSIFOpenEx2L(const char *pszFilename, const char *pszAccess,
     if (CPLStrnlen(pszFilename, knMaxPath) == knMaxPath)
         return nullptr;
 
+    if (strstr(pszFilename, "PDAL"))
+        std::cerr << "Finding handler for " << pszFilename << "!\n";
     VSIFilesystemHandler *poFSHandler = VSIFileManager::GetHandler(pszFilename);
 
+    if (strstr(pszFilename, "PDAL"))
+        std::cerr << "Opening for " << pszFilename << "!\n";
     auto fp = poFSHandler->Open(pszFilename, pszAccess, CPL_TO_BOOL(bSetError),
                                 papszOptions);
 
@@ -4317,6 +4321,8 @@ char **VSIFileManager::GetPrefixes()
 VSIFilesystemHandler *VSIFileManager::GetHandler(const char *pszPath)
 
 {
+    if (strstr(pszPath, "PDAL"))
+        std::cerr << "Getting handler for " << pszPath << "!\n";
     void (*pfnLoader)(void) = nullptr;
     {
         CPLMutexHolder oHolder(&hVSIFileManagerMutex);
@@ -4329,7 +4335,12 @@ VSIFilesystemHandler *VSIFileManager::GetHandler(const char *pszPath)
             const char *pszIterKey = key.c_str();
             const size_t nIterKeyLen = key.size();
             if (strncmp(pszPath, pszIterKey, nIterKeyLen) == 0)
+            {
+
+                if (strstr(pszPath, "PDAL"))
+                    std::cerr << "Returning handler for " << key << "!\n";
                 return handler.get();
+            }
 
             // "/vsimem\foo" should be handled as "/vsimem/foo".
             if (nIterKeyLen && nPathLen > nIterKeyLen &&
