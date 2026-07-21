@@ -4658,6 +4658,7 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
                                    const char *pszAccess, bool bSetError,
                                    CSLConstList papszOptions)
 {
+    std::cerr << "Open file = " << pszFilename << "!\n";
     const bool bStartsWithVSICurlPrefix = StartsWithVSICurlPrefix(pszFilename);
     if (!bStartsWithVSICurlPrefix &&
         !cpl::starts_with(std::string_view(pszFilename), GetFSPrefix()))
@@ -4683,6 +4684,7 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
             return nullptr;
     }
 
+    std::cerr << "Check prefix!\n";
     bool bListDir = true;
     bool bEmptyDir = false;
     std::string osURL =
@@ -4702,6 +4704,7 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
                               EQUAL(pszOptionVal, "EMPTY_DIR") ||
                               CPLTestBool(pszOptionVal) || !bCache;
 
+    std::cerr << "Zarr exception block!\n";
     std::string osFilename(pszFilename);
     bool bGotFileList = !bSkipReadDir;
     bool bForceExistsCheck = false;
@@ -4752,6 +4755,7 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
         return nullptr;
     }
 
+    std::cerr << "About to create handle!\n";
     auto poHandle =
         std::unique_ptr<VSICurlHandle>(CreateFileHandle(osFilename.c_str()));
     if (poHandle == nullptr)
