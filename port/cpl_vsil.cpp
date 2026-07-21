@@ -4334,6 +4334,10 @@ VSIFilesystemHandler *VSIFileManager::GetHandler(const char *pszPath)
         {
             const char *pszIterKey = key.c_str();
             const size_t nIterKeyLen = key.size();
+            if (strstr(pszPath, "PDAL"))
+                std::cerr << "Checking path " << pszPath << " against key "
+                          << pszIterKey << "with size = " << nIterKeyLen
+                          << "!\n";
             if (strncmp(pszPath, pszIterKey, nIterKeyLen) == 0)
             {
 
@@ -4370,7 +4374,12 @@ VSIFilesystemHandler *VSIFileManager::GetHandler(const char *pszPath)
         }
 
         if (!pfnLoader)
+        {
+            if (strstr(pszPath, "PDAL"))
+                std::cerr << "Returning default handler for " << pszPath
+                          << "!\n";
             return poThis->m_poDefaultHandler.get();
+        }
     }
 
     pfnLoader();
