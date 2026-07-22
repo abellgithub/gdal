@@ -32,8 +32,13 @@ TEST(hang, test)
                     "autzen/autzen-classified.copc.laz");
     uint32_t size = 54;
 
+    bool done = false;
+
+    std::mutex m;
+    std::condition_variable cv;
+
     std::thread t(
-        [url, size]
+        [url, size, &done, &m, &cv]
         {
             std::vector<char> buf(size);
 
@@ -56,11 +61,26 @@ TEST(hang, test)
             for (char c : buf)
                 sum += (uint8_t)c;
             std::cerr << "Sum = " << sum << "!\n";
+
+            std::lock_guard<std::mutex> _(m);
+            done = true;
+            cv.notify_all();
         });
 
-    std::cerr << "Thread running!\n";
+    std::unique_lock<std::mutex> lock(m);
+    cv.wait_for(lock, std::chrono::milliseconds(5000),
+                [&done]()
+                {
+                    if (done)
+                        std::cerr << "Completed VSI task!\n";
+                    return done;
+                });
+    if (!done)
+    {
+        std::cerr << "VSI task timeout.\n";
+        std::terminate();
+    }
     t.join();
-    std::cerr << "Thread joined!\n";
 }
 
 }  // namespace
