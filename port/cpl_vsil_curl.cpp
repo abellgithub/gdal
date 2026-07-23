@@ -4122,16 +4122,28 @@ struct CachedConnection
 };
 }  // namespace
 
+using ConnectionMap =
+    std::map<VSICurlFilesystemHandlerBase *, CachedConnection>;
+
 #ifdef _WIN32
+static ConnectionMap connectionMap;
+
+static ConnectionMap &GetConnectionCache()
+{
+    return connectionMap;
+}
+
 // Currently thread_local and C++ objects don't work well with DLL on Windows
+/**
 static void FreeCachedConnection(void *pData)
 {
     delete static_cast<
         std::map<VSICurlFilesystemHandlerBase *, CachedConnection> *>(pData);
 }
 
+
 // Per-thread and per-filesystem Curl connection cache.
-static std::map<VSICurlFilesystemHandlerBase *, CachedConnection> &
+static VSICurlFilesystemHandlerBase *, CachedConnection> &
 GetConnectionCache()
 {
     static std::map<VSICurlFilesystemHandlerBase *, CachedConnection>
@@ -4159,6 +4171,7 @@ GetConnectionCache()
     return *static_cast<
         std::map<VSICurlFilesystemHandlerBase *, CachedConnection> *>(pData);
 }
+**/
 #else
 static thread_local std::map<VSICurlFilesystemHandlerBase *, CachedConnection>
     g_tls_connectionCache;
@@ -4658,12 +4671,10 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
                                    const char *pszAccess, bool bSetError,
                                    CSLConstList papszOptions)
 {
-    std::cerr << "Open file = " << pszFilename << "!\n";
     const bool bStartsWithVSICurlPrefix = StartsWithVSICurlPrefix(pszFilename);
     if (!bStartsWithVSICurlPrefix &&
         !cpl::starts_with(std::string_view(pszFilename), GetFSPrefix()))
     {
-        std::cerr << "No curl prefix!\n";
         return nullptr;
     }
 
@@ -4684,7 +4695,6 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
             return nullptr;
     }
 
-    std::cerr << "Check prefix!\n";
     bool bListDir = true;
     bool bEmptyDir = false;
     std::string osURL =
@@ -4704,7 +4714,6 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
                               EQUAL(pszOptionVal, "EMPTY_DIR") ||
                               CPLTestBool(pszOptionVal) || !bCache;
 
-    std::cerr << "Zarr exception block!\n";
     std::string osFilename(pszFilename);
     bool bGotFileList = !bSkipReadDir;
     bool bForceExistsCheck = false;
@@ -4741,7 +4750,6 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
             }
             else
             {
-                std::cerr << "Could find file!\n";
                 return nullptr;
             }
         }
@@ -4751,30 +4759,21 @@ VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
     if (GetCachedFileProp(osURL.c_str(), cachedFileProp) &&
         cachedFileProp.eExists == EXIST_YES && cachedFileProp.bIsDirectory)
     {
-        std::cerr << "Cached!\n";
         return nullptr;
     }
 
-    std::cerr << "About to create handle!\n";
     auto poHandle =
         std::unique_ptr<VSICurlHandle>(CreateFileHandle(osFilename.c_str()));
     if (poHandle == nullptr)
-    {
-        std::cerr << "Couldn't create file handle!\n";
         return nullptr;
-    }
     poHandle->SetCache(bCache);
     if (!bGotFileList || bForceExistsCheck)
     {
         // If we didn't get a filelist, check that the file really exists.
         if (!poHandle->Exists(bSetError))
-        {
-            std::cerr << "No filelist, doesn't exist!\n";
             return nullptr;
-        }
     }
 
-    std::cerr << "At end of open!\n";
     if (CPLTestBool(CPLGetConfigOption("VSI_CACHE", "FALSE")))
         return VSIVirtualHandleUniquePtr(
             VSICreateCachedFile(poHandle.release()));
