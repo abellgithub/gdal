@@ -145,6 +145,25 @@ class VSICurlFilesystemHandlerBase : public VSIFilesystemHandler
 {
     CPL_DISALLOW_COPY_ASSIGN(VSICurlFilesystemHandlerBase)
 
+    enum class HandleState
+    {
+        Ready,
+        Running,
+        Interrupted,
+        Done
+    };
+
+    /// Handle/State pair.
+    struct Handle
+    {
+        explicit Handle(CURL *curl) : m_curl(curl), m_state(HandleState::Ready)
+        {
+        }
+
+        CURL *m_curl{nullptr};
+        HandleState m_state{HandleState::Ready};
+    };
+
     struct FilenameOffsetPair
     {
         std::string filename_;
@@ -201,7 +220,25 @@ class VSICurlFilesystemHandlerBase : public VSIFilesystemHandler
         std::string osData{};
     };
 
-    std::mutex m_oMutex{};
+    std::mutex m_useMutex{};  // Protects the use count
+    int m_useCount = 0;       // Count of users of the run thread.
+    std::atomic<bool> m_stop{false};
+    std::condition_variable m_runCv{};
+    std::unique_ptr<std::thread> m_runThread{};
+    std::mutex m_runMutex{};  // Protects data associated with the run thread.
+    std::vector<Handle> m_handles{};
+    CURLM *m_multi = nullptr;
+
+    void Run();
+    void StartRunThread();
+    void StopRunThread();
+    int HandleReady();
+    bool HandleInterrupted();
+    bool HandleCompleted();
+    bool HandleFailure();
+    bool RemoveDoneHandle(CURL *easyHandle);
+
+    std::mutex m_oMutex{};  // Map region mutex.
     std::map<std::string, std::unique_ptr<RegionInDownload>>
         m_oMapRegionInDownload{};
 
@@ -298,8 +335,6 @@ class VSICurlFilesystemHandlerBase : public VSIFilesystemHandler
     static void SetCachedFileProp(const char *pszURL, FileProp &oFileProp);
     void InvalidateCachedData(const char *pszURL);
 
-    CURLM *GetCurlMultiHandleFor(const std::string &osURL);
-
     virtual void ClearCache();
     virtual void PartialClearCache(const char *pszFilename);
 
@@ -311,6 +346,12 @@ class VSICurlFilesystemHandlerBase : public VSIFilesystemHandler
 
     std::string
     GetStreamingFilename(const std::string &osFilename) const override = 0;
+
+    void IncUseCount();
+    void DecUseCount();
+    void Interrupt(CURL *easyHandle);
+    void Perform(CURL *easyHandle);
+    void Perform(std::vector<CURL *> easyHandles);
 
     static std::set<std::string> GetS3IgnoredStorageClasses();
 
@@ -389,8 +430,7 @@ class VSICurlHandle /* non final*/ : public VSIVirtualHandle
 
     bool m_bUseHead = false;
     bool m_bUseRedirectURLIfNoQueryStringParams = false;
-
-    mutable std::atomic<bool> m_bInterrupt = false;
+    bool m_bInterrupt = false;
 
     // Specific to Planetary Computer signing:
     // https://planetarycomputer.microsoft.com/docs/concepts/sas/
@@ -496,6 +536,7 @@ class VSICurlHandle /* non final*/ : public VSIVirtualHandle
 
     void Interrupt() override
     {
+        poFS->Interrupt(this);
         m_bInterrupt = true;
     }
 

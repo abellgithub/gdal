@@ -25,6 +25,7 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <optional>
 #include <set>
 
 #define ZARR_DEBUG_KEY "ZARR"
@@ -120,6 +121,12 @@ class ZarrDataset final : public GDALDataset
                      BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
                      GSpacing nLineSpace, GSpacing nBandSpace,
                      GDALRasterIOExtraArg *psExtraArg) override;
+
+    CPLErr IBuildOverviews(const char *pszResampling, int nOverviews,
+                           const int *panOverviewList, int nListBands,
+                           const int *panBandList, GDALProgressFunc pfnProgress,
+                           void *pProgressData,
+                           CSLConstList papszOptions) override;
 };
 
 /************************************************************************/
@@ -131,7 +138,15 @@ class ZarrRasterBand final : public GDALRasterBand
     friend class ZarrDataset;
 
     std::shared_ptr<GDALMDArray> m_poArray;
+    std::string m_osViewDef{};
     GDALColorInterp m_eColorInterp = GCI_Undefined;
+    std::optional<double> m_dfNoData{};
+    std::optional<uint64_t> m_nNoDataUInt64{};
+    std::optional<int64_t> m_nNoDataInt64{};
+    std::optional<double> m_dfOffset{};
+    std::optional<double> m_dfScale{};
+    std::map<int, std::unique_ptr<GDALRasterBand>> m_oMapOverview{};
+    std::vector<std::unique_ptr<GDALRasterBand>> m_aoOverviewOld{};
 
   protected:
     CPLErr IReadBlock(int nBlockXOff, int nBlockYOff, void *pData) override;
@@ -143,7 +158,8 @@ class ZarrRasterBand final : public GDALRasterBand
                      GDALRasterIOExtraArg *psExtraArg) override;
 
   public:
-    explicit ZarrRasterBand(const std::shared_ptr<GDALMDArray> &poArray);
+    explicit ZarrRasterBand(const std::shared_ptr<GDALMDArray> &poArray,
+                            const std::string &viewDef = std::string());
 
     double GetNoDataValue(int *pbHasNoData) override;
     int64_t GetNoDataValueAsInt64(int *pbHasNoData) override;
@@ -159,6 +175,8 @@ class ZarrRasterBand final : public GDALRasterBand
     CPLErr SetUnitType(const char *pszNewValue) override;
     GDALColorInterp GetColorInterpretation() override;
     CPLErr SetColorInterpretation(GDALColorInterp eColorInterp) override;
+    int GetOverviewCount() override;
+    GDALRasterBand *GetOverview(int idx) override;
 };
 
 /************************************************************************/
@@ -1138,9 +1156,11 @@ class ZarrArray CPL_NON_FINAL : public GDALPamMDArray
     double GetScale(bool *pbHasScale,
                     GDALDataType *peStorageType) const override;
 
-    bool SetOffset(double dfOffset, GDALDataType eStorageType) override;
+    bool SetOffset(double dfOffset,
+                   GDALDataType eStorageType = GDT_Unknown) override;
 
-    bool SetScale(double dfScale, GDALDataType eStorageType) override;
+    bool SetScale(double dfScale,
+                  GDALDataType eStorageType = GDT_Unknown) override;
 
     std::vector<std::shared_ptr<GDALMDArray>>
     GetCoordinateVariables() const override;
